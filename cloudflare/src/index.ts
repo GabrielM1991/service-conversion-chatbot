@@ -125,16 +125,13 @@ async function addKnowledge(
   } catch (error) {
     return json({ detail: error instanceof Error ? error.message : "Payload inválido" }, 400);
   }
-  const metadata = await ingestTextKnowledge(env, tenantId, input);
+  const { metadata, chunks } = await ingestTextKnowledge(env, tenantId, input);
   try {
-    await tenantWorkspace(env, tenantId).addKnowledge(metadata);
+    await tenantWorkspace(env, tenantId).addKnowledge(metadata, chunks);
   } catch (error) {
-    await Promise.allSettled([
-      env.KNOWLEDGE_BUCKET.delete(metadata.objectKey),
-      env.KNOWLEDGE_INDEX.deleteByIds(
-        Array.from({ length: metadata.chunks }, (_, index) => `${metadata.id}-${index}`),
-      ),
-    ]);
+    await env.KNOWLEDGE_INDEX.deleteByIds(
+      Array.from({ length: metadata.chunks }, (_, index) => `${metadata.id}-${index}`),
+    ).catch(() => undefined);
     throw error;
   }
   return json(metadata, 201);
@@ -151,7 +148,17 @@ async function queryKnowledge(
   const payload = (await request.json()) as Record<string, unknown>;
   const query = typeof payload.query === "string" ? payload.query.trim() : "";
   if (query.length < 2 || query.length > 2_000) return json({ detail: "Consulta inválida" }, 400);
-  return json({ matches: await searchKnowledge(env, tenantId, query) });
+  const matches = await searchKnowledge(env, tenantId, query);
+  const excerpts = await tenantWorkspace(env, tenantId).knowledgeExcerpts(
+    matches.map((match) => match.id),
+  );
+  return json({
+    matches: matches.map((match) => ({
+      ...match,
+      title: excerpts[match.id]?.title ?? match.title,
+      excerpt: excerpts[match.id]?.excerpt ?? null,
+    })),
+  });
 }
 
 async function tenantSummary(request: Request, env: Env, tenantId: string): Promise<Response> {
@@ -168,7 +175,7 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
   }
   if (request.method === "GET" && url.pathname === "/health") {
     await env.GLOBAL_DB.prepare("SELECT 1 AS ok").first();
-    return json({ status: "ok", runtime: "cloudflare-workers", storage: "d1+durable-objects+r2" });
+    return json({ status: "ok", runtime: "cloudflare-workers", storage: "d1+durable-objects" });
   }
   if (request.method === "POST" && url.pathname === "/internal/tenants") {
     return createTenant(request, env);

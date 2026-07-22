@@ -26,13 +26,6 @@
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["TenantWorkspace"] }
   ],
-  "r2_buckets": [
-    {
-      "binding": "KNOWLEDGE_BUCKET",
-      "bucket_name": "serviceflow-knowledge",
-      "preview_bucket_name": "serviceflow-knowledge-preview"
-    }
-  ],
   "queues": {
     "producers": [
       { "binding": "MESSAGE_QUEUE", "queue": "serviceflow-messages" }

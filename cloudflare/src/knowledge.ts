@@ -1,4 +1,9 @@
-import type { Env, KnowledgeMetadata, KnowledgeTextInput } from "./types";
+import type {
+  Env,
+  KnowledgeMetadata,
+  KnowledgeTextInput,
+  KnowledgeVectorMatch,
+} from "./types";
 
 const MAX_TEXT_CHARACTERS = 100_000;
 const CHUNK_CHARACTERS = 4_000;
@@ -39,40 +44,38 @@ export async function ingestTextKnowledge(
   env: Env,
   tenantId: string,
   input: KnowledgeTextInput,
-): Promise<KnowledgeMetadata> {
+): Promise<{ metadata: KnowledgeMetadata; chunks: string[] }> {
   const id = crypto.randomUUID();
-  const objectKey = `tenants/${tenantId}/knowledge/${id}.txt`;
   const chunks = chunkText(input.text);
   const vectors = await embeddings(env, chunks);
   const createdAt = new Date().toISOString();
 
-  await env.KNOWLEDGE_BUCKET.put(objectKey, input.text, {
-    httpMetadata: { contentType: "text/plain; charset=utf-8" },
-    customMetadata: { tenantId, title: input.title, knowledgeId: id },
-  });
+  const vectorIds = chunks.map((_, index) => `${id}-${index}`);
 
   try {
     await env.KNOWLEDGE_INDEX.upsert(
       vectors.map((values, index) => ({
-        id: `${id}-${index}`,
+        id: vectorIds[index]!,
         values,
-        metadata: { tenantId, title: input.title, objectKey, chunk: index },
+        metadata: { tenantId, title: input.title, knowledgeId: id, chunk: index },
       })),
     );
   } catch (error) {
-    await env.KNOWLEDGE_BUCKET.delete(objectKey);
+    await env.KNOWLEDGE_INDEX.deleteByIds(vectorIds).catch(() => undefined);
     throw error;
   }
 
   return {
-    id,
-    tenantId,
-    title: input.title,
-    objectKey,
-    contentType: "text/plain",
-    characters: input.text.length,
-    chunks: chunks.length,
-    createdAt,
+    metadata: {
+      id,
+      tenantId,
+      title: input.title,
+      contentType: "text/plain",
+      characters: input.text.length,
+      chunks: chunks.length,
+      createdAt,
+    },
+    chunks,
   };
 }
 
@@ -80,7 +83,7 @@ export async function searchKnowledge(
   env: Env,
   tenantId: string,
   query: string,
-): Promise<Array<Record<string, unknown>>> {
+): Promise<KnowledgeVectorMatch[]> {
   const [queryVector] = await embeddings(env, [query]);
   if (!queryVector) return [];
   const result = await env.KNOWLEDGE_INDEX.query(queryVector, {
@@ -88,17 +91,12 @@ export async function searchKnowledge(
     returnMetadata: "all",
     filter: { tenantId: { $eq: tenantId } },
   });
-  const responses: Array<Record<string, unknown>> = [];
-  for (const match of result.matches) {
+  return result.matches.map((match) => {
     const metadata = (match.metadata ?? {}) as Record<string, unknown>;
-    const objectKey = typeof metadata.objectKey === "string" ? metadata.objectKey : null;
-    const object = objectKey ? await env.KNOWLEDGE_BUCKET.get(objectKey) : null;
-    responses.push({
+    return {
       id: match.id,
       score: match.score,
-      title: metadata.title,
-      excerpt: object ? (await object.text()).slice(0, 2_000) : null,
-    });
-  }
-  return responses;
+      title: typeof metadata.title === "string" ? metadata.title : null,
+    };
+  });
 }

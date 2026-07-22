@@ -1,6 +1,11 @@
 import { DurableObject } from "cloudflare:workers";
 
-import type { Env, KnowledgeMetadata, WhatsappMessageReceived } from "./types";
+import type {
+  Env,
+  KnowledgeExcerpt,
+  KnowledgeMetadata,
+  WhatsappMessageReceived,
+} from "./types";
 
 export class TenantWorkspace extends DurableObject<Env> {
   private readonly sql: SqlStorage;
@@ -11,6 +16,7 @@ export class TenantWorkspace extends DurableObject<Env> {
     this.storage = ctx.storage;
     this.sql = ctx.storage.sql;
     this.sql.exec(`
+      PRAGMA foreign_keys = ON;
       CREATE TABLE IF NOT EXISTS processed_messages (
         message_id TEXT PRIMARY KEY,
         processed_at TEXT NOT NULL
@@ -24,15 +30,6 @@ export class TenantWorkspace extends DurableObject<Env> {
       );
       CREATE INDEX IF NOT EXISTS ix_messages_phone_created
         ON messages(customer_phone, created_at);
-      CREATE TABLE IF NOT EXISTS knowledge_sources (
-        id TEXT PRIMARY KEY,
-        title TEXT NOT NULL,
-        object_key TEXT NOT NULL UNIQUE,
-        content_type TEXT NOT NULL,
-        characters INTEGER NOT NULL,
-        chunks INTEGER NOT NULL,
-        created_at TEXT NOT NULL
-      );
       CREATE TABLE IF NOT EXISTS appointments (
         id TEXT PRIMARY KEY,
         customer_phone TEXT NOT NULL,
@@ -44,6 +41,49 @@ export class TenantWorkspace extends DurableObject<Env> {
       CREATE UNIQUE INDEX IF NOT EXISTS uq_appointments_confirmed_slot
         ON appointments(starts_at) WHERE status IN ('pending', 'confirmed');
     `);
+    this.migrateKnowledgeSchema();
+    this.sql.exec(`
+      CREATE TABLE IF NOT EXISTS knowledge_sources (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        content_type TEXT NOT NULL,
+        characters INTEGER NOT NULL,
+        chunks INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS knowledge_chunks (
+        id TEXT PRIMARY KEY,
+        source_id TEXT NOT NULL REFERENCES knowledge_sources(id) ON DELETE CASCADE,
+        position INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        UNIQUE(source_id, position)
+      );
+      CREATE INDEX IF NOT EXISTS ix_knowledge_chunks_source
+        ON knowledge_chunks(source_id, position);
+    `);
+  }
+
+  private migrateKnowledgeSchema(): void {
+    const columns = this.sql.exec("PRAGMA table_info(knowledge_sources)").toArray();
+    if (!columns.some((column) => column.name === "object_key")) return;
+    this.storage.transactionSync(() => {
+      this.sql.exec(`
+        ALTER TABLE knowledge_sources RENAME TO knowledge_sources_r2_legacy;
+        CREATE TABLE knowledge_sources (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          content_type TEXT NOT NULL,
+          characters INTEGER NOT NULL,
+          chunks INTEGER NOT NULL,
+          created_at TEXT NOT NULL
+        );
+        INSERT INTO knowledge_sources
+          (id, title, content_type, characters, chunks, created_at)
+        SELECT id, title, content_type, characters, chunks, created_at
+        FROM knowledge_sources_r2_legacy;
+        DROP TABLE knowledge_sources_r2_legacy;
+      `);
+    });
   }
 
   async processMessage(message: WhatsappMessageReceived): Promise<{ duplicate: boolean }> {
@@ -70,18 +110,51 @@ export class TenantWorkspace extends DurableObject<Env> {
     return { duplicate };
   }
 
-  async addKnowledge(source: KnowledgeMetadata): Promise<void> {
-    this.sql.exec(
-      `INSERT INTO knowledge_sources
-       (id, title, object_key, content_type, characters, chunks, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      source.id,
-      source.title,
-      source.objectKey,
-      source.contentType,
-      source.characters,
-      source.chunks,
-      source.createdAt,
+  async addKnowledge(source: KnowledgeMetadata, chunks: string[]): Promise<void> {
+    if (chunks.length !== source.chunks) throw new Error("Cantidad de fragmentos inválida");
+    this.storage.transactionSync(() => {
+      this.sql.exec(
+        `INSERT INTO knowledge_sources
+         (id, title, content_type, characters, chunks, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        source.id,
+        source.title,
+        source.contentType,
+        source.characters,
+        source.chunks,
+        source.createdAt,
+      );
+      chunks.forEach((content, position) => {
+        this.sql.exec(
+          `INSERT INTO knowledge_chunks (id, source_id, position, content)
+           VALUES (?, ?, ?, ?)`,
+          `${source.id}-${position}`,
+          source.id,
+          position,
+          content,
+        );
+      });
+    });
+  }
+
+  async knowledgeExcerpts(ids: string[]): Promise<Record<string, KnowledgeExcerpt>> {
+    if (!ids.length) return {};
+    const safeIds = ids.slice(0, 20);
+    const placeholders = safeIds.map(() => "?").join(", ");
+    const rows = this.sql
+      .exec(
+        `SELECT c.id, c.content, s.title
+         FROM knowledge_chunks c
+         JOIN knowledge_sources s ON s.id = c.source_id
+         WHERE c.id IN (${placeholders})`,
+        ...safeIds,
+      )
+      .toArray();
+    return Object.fromEntries(
+      rows.map((row) => [
+        String(row.id),
+        { title: String(row.title), excerpt: String(row.content).slice(0, 2_000) },
+      ]),
     );
   }
 
