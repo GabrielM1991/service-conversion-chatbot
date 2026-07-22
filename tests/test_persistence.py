@@ -68,6 +68,9 @@ def test_schema_has_all_tenant_aggregate_tables() -> None:
         "appointments",
         "tenant_ai_configurations",
         "knowledge_sources",
+        "users",
+        "tenant_memberships",
+        "auth_sessions",
     }
     for table_name in ("services", "customers", "conversations", "messages", "appointments"):
         assert "tenant_id" in Base.metadata.tables[table_name].columns

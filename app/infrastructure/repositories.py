@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
@@ -14,6 +15,9 @@ from app.domain.models import (
     KnowledgeSource,
     OutgoingMessage,
     Tenant,
+    TenantMembership,
+    UserAccount,
+    AuthenticatedUser,
 )
 from app.infrastructure.database import tenant_session
 from app.infrastructure.orm import (
@@ -25,7 +29,91 @@ from app.infrastructure.orm import (
     ServiceRow,
     TenantRow,
     TenantAIConfigurationRow,
+    UserRow,
+    TenantMembershipRow,
+    AuthSessionRow,
 )
+
+
+class SqlAlchemyAuthRepository:
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+        self._session_factory = session_factory
+
+    async def get_user_by_email(self, email: str) -> UserAccount | None:
+        async with self._session_factory() as session:
+            user = await session.scalar(
+                select(UserRow).where(
+                    UserRow.email == email.casefold(), UserRow.active.is_(True)
+                )
+            )
+            if user is None:
+                return None
+            memberships = await self._memberships(session, user.id)
+            return UserAccount(str(user.id), user.email, user.password_hash, memberships)
+
+    async def create_session(
+        self, user_id: str, token_hash: str, expires_at: datetime
+    ) -> str:
+        session_id = uuid.uuid4()
+        async with self._session_factory() as session, session.begin():
+            await session.execute(
+                delete(AuthSessionRow).where(
+                    AuthSessionRow.expires_at <= datetime.now(timezone.utc)
+                )
+            )
+            session.add(
+                AuthSessionRow(
+                    id=session_id,
+                    user_id=uuid.UUID(user_id),
+                    token_hash=token_hash,
+                    expires_at=expires_at,
+                )
+            )
+        return str(session_id)
+
+    async def get_session(
+        self, token_hash: str, now: datetime
+    ) -> AuthenticatedUser | None:
+        async with self._session_factory() as session:
+            row = await session.scalar(
+                select(AuthSessionRow)
+                .join(UserRow, UserRow.id == AuthSessionRow.user_id)
+                .where(
+                    AuthSessionRow.token_hash == token_hash,
+                    AuthSessionRow.expires_at > now,
+                    UserRow.active.is_(True),
+                )
+            )
+            if row is None:
+                return None
+            user = await session.get(UserRow, row.user_id)
+            if user is None:
+                return None
+            memberships = await self._memberships(session, user.id)
+            return AuthenticatedUser(str(user.id), user.email, memberships, str(row.id))
+
+    async def delete_session(self, session_id: str) -> None:
+        try:
+            parsed_id = uuid.UUID(session_id)
+        except ValueError:
+            return
+        async with self._session_factory() as session, session.begin():
+            row = await session.get(AuthSessionRow, parsed_id)
+            if row is not None:
+                await session.delete(row)
+
+    @staticmethod
+    async def _memberships(
+        session: AsyncSession, user_id: uuid.UUID
+    ) -> tuple[TenantMembership, ...]:
+        rows = list(
+            await session.scalars(
+                select(TenantMembershipRow)
+                .where(TenantMembershipRow.user_id == user_id)
+                .order_by(TenantMembershipRow.tenant_id)
+            )
+        )
+        return tuple(TenantMembership(row.tenant_id, row.role) for row in rows)
 
 
 class SqlAlchemyTenantRepository:

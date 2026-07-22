@@ -12,6 +12,8 @@ from app.domain.models import (
     Tenant,
     TimeSlot,
     KnowledgeSource,
+    UserAccount,
+    AuthenticatedUser,
 )
 
 
@@ -83,3 +85,17 @@ class KnowledgeRepository(Protocol):
     async def get(self, tenant_id: str, source_id: str) -> KnowledgeSource | None: ...
 
     async def delete(self, tenant_id: str, source_id: str) -> KnowledgeSource | None: ...
+
+
+class AuthRepository(Protocol):
+    async def get_user_by_email(self, email: str) -> UserAccount | None: ...
+
+    async def create_session(
+        self, user_id: str, token_hash: str, expires_at: datetime
+    ) -> str: ...
+
+    async def get_session(
+        self, token_hash: str, now: datetime
+    ) -> AuthenticatedUser | None: ...
+
+    async def delete_session(self, session_id: str) -> None: ...

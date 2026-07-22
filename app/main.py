@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import replace
@@ -9,13 +10,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from app.bootstrap import build_container
-from app.domain.models import AIConfiguration, IncomingMessage, KnowledgeSource
+from app.domain.models import AIConfiguration, AuthenticatedUser, IncomingMessage, KnowledgeSource
+from app.infrastructure.auth import (
+    CSRF_COOKIE,
+    SESSION_COOKIE,
+    hash_session_token,
+    new_csrf_token,
+    new_session_token,
+    session_expiration,
+)
 from app.infrastructure.knowledge import extract_pdf_text, verify_image
 from app.infrastructure.logging import configure_logging
 
@@ -43,7 +52,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Service Conversion Chatbot",
-    version="0.5.0",
+    version="0.6.0",
     description="Webhook multi-tenant con procesamiento asíncrono y arquitectura hexagonal.",
     lifespan=lifespan,
 )
@@ -91,8 +100,52 @@ class KnowledgeTextCreate(BaseModel):
     text: str = Field(min_length=3, max_length=100_000)
 
 
-def require_admin_mode(request: Request) -> None:
-    require_demo_mode(request)
+class LoginRequest(BaseModel):
+    email: str = Field(min_length=5, max_length=320)
+    password: str = Field(min_length=8, max_length=256)
+
+
+async def authenticated_user(request: Request) -> AuthenticatedUser | None:
+    cached = getattr(request.state, "authenticated_user", None)
+    if cached is not None:
+        return cached
+    token = request.cookies.get(SESSION_COOKIE)
+    if not token:
+        return None
+    user = await request.app.state.container.auth.get_session(
+        hash_session_token(token), datetime.now(timezone.utc)
+    )
+    if user is not None:
+        request.state.authenticated_user = user
+    return user
+
+
+async def require_authenticated_user(request: Request) -> AuthenticatedUser:
+    user = await authenticated_user(request)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Inicia sesión para continuar")
+    return user
+
+
+async def require_tenant_access(
+    request: Request, tenant_id: str, *, write: bool = False
+) -> tuple[AuthenticatedUser, str]:
+    user = await require_authenticated_user(request)
+    membership = next(
+        (item for item in user.memberships if item.tenant_id == tenant_id), None
+    )
+    if membership is None:
+        raise HTTPException(status_code=404, detail="Empresa no encontrada")
+    if write and membership.role not in {"owner", "admin"}:
+        raise HTTPException(status_code=403, detail="Tu rol es de solo lectura")
+    return user, membership.role
+
+
+def require_csrf(request: Request) -> None:
+    cookie_token = request.cookies.get(CSRF_COOKIE, "")
+    header_token = request.headers.get("X-CSRF-Token", "")
+    if not cookie_token or not secrets.compare_digest(cookie_token, header_token):
+        raise HTTPException(status_code=403, detail="Token de seguridad inválido")
 
 
 def require_demo_mode(request: Request) -> None:
@@ -107,22 +160,84 @@ async def demo_page(request: Request) -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.get("/login", include_in_schema=False)
+async def login_page(request: Request) -> Response:
+    if await authenticated_user(request) is not None:
+        return RedirectResponse("/admin", status_code=303)
+    return FileResponse(STATIC_DIR / "login.html")
+
+
+@app.post("/auth/login", include_in_schema=False)
+async def login(payload: LoginRequest, request: Request) -> JSONResponse:
+    runtime = request.app.state.container
+    user = await runtime.auth.get_user_by_email(payload.email.strip().casefold())
+    valid_password = runtime.passwords.verify_or_dummy(
+        user.password_hash if user else None, payload.password
+    )
+    if user is None or not valid_password:
+        raise HTTPException(status_code=401, detail="Correo o contraseña incorrectos")
+    token = new_session_token()
+    csrf_token = new_csrf_token()
+    expires_at = session_expiration(runtime.session_ttl_hours)
+    await runtime.auth.create_session(user.id, hash_session_token(token), expires_at)
+    max_age = runtime.session_ttl_hours * 3600
+    response = JSONResponse({"status": "authenticated"})
+    response.set_cookie(
+        SESSION_COOKIE, token, max_age=max_age, httponly=True, secure=runtime.cookie_secure,
+        samesite="lax", path="/",
+    )
+    response.set_cookie(
+        CSRF_COOKIE, csrf_token, max_age=max_age, httponly=False,
+        secure=runtime.cookie_secure, samesite="strict", path="/",
+    )
+    return response
+
+
+@app.get("/auth/me", include_in_schema=False)
+async def auth_me(request: Request) -> dict[str, object]:
+    user = await require_authenticated_user(request)
+    return {
+        "id": user.id,
+        "email": user.email,
+        "memberships": [
+            {"tenant_id": membership.tenant_id, "role": membership.role}
+            for membership in user.memberships
+        ],
+    }
+
+
+@app.post("/auth/logout", include_in_schema=False)
+async def logout(request: Request) -> JSONResponse:
+    require_csrf(request)
+    user = await require_authenticated_user(request)
+    await request.app.state.container.auth.delete_session(user.session_id)
+    response = JSONResponse({"status": "signed_out"})
+    response.delete_cookie(SESSION_COOKIE, path="/")
+    response.delete_cookie(CSRF_COOKIE, path="/")
+    return response
+
+
 @app.get("/admin", include_in_schema=False)
-async def admin_page(request: Request) -> FileResponse:
-    require_admin_mode(request)
+async def admin_page(request: Request) -> Response:
+    if await authenticated_user(request) is None:
+        return RedirectResponse("/login", status_code=303)
     return FileResponse(STATIC_DIR / "admin.html")
 
 
 @app.get("/admin/api/tenants", include_in_schema=False)
 async def admin_tenants(request: Request) -> list[dict[str, str]]:
-    require_admin_mode(request)
-    tenants = await request.app.state.container.tenants.list_active()
-    return [{"id": tenant.id, "name": tenant.name} for tenant in tenants]
+    user = await require_authenticated_user(request)
+    tenants = []
+    for membership in user.memberships:
+        tenant = await request.app.state.container.tenants.get(membership.tenant_id)
+        if tenant is not None:
+            tenants.append({"id": tenant.id, "name": tenant.name, "role": membership.role})
+    return tenants
 
 
 @app.get("/admin/api/tenants/{tenant_id}/settings", include_in_schema=False)
 async def admin_settings(tenant_id: str, request: Request) -> dict[str, object]:
-    require_admin_mode(request)
+    _, role = await require_tenant_access(request, tenant_id)
     runtime = request.app.state.container
     tenant = await runtime.tenants.get(tenant_id)
     if tenant is None:
@@ -140,6 +255,7 @@ async def admin_settings(tenant_id: str, request: Request) -> dict[str, object]:
         "api_key_configured": bool(configuration and configuration.encrypted_api_key),
         "api_key_hint": f"••••{configuration.key_last_four}" if configuration and configuration.key_last_four else None,
         "encryption_available": runtime.secret_cipher.available,
+        "role": role,
     }
 
 
@@ -147,7 +263,8 @@ async def admin_settings(tenant_id: str, request: Request) -> dict[str, object]:
 async def update_admin_settings(
     tenant_id: str, payload: AdminSettingsUpdate, request: Request
 ) -> dict[str, str]:
-    require_admin_mode(request)
+    require_csrf(request)
+    await require_tenant_access(request, tenant_id, write=True)
     runtime = request.app.state.container
     tenant = await runtime.tenants.get(tenant_id)
     if tenant is None:
@@ -200,7 +317,7 @@ def knowledge_payload(source: KnowledgeSource) -> dict[str, object]:
 
 @app.get("/admin/api/tenants/{tenant_id}/knowledge", include_in_schema=False)
 async def list_admin_knowledge(tenant_id: str, request: Request) -> list[dict[str, object]]:
-    require_admin_mode(request)
+    await require_tenant_access(request, tenant_id)
     if await request.app.state.container.tenants.get(tenant_id) is None:
         raise HTTPException(status_code=404, detail="Tenant no encontrado")
     sources = await request.app.state.container.knowledge.list(tenant_id)
@@ -211,7 +328,8 @@ async def list_admin_knowledge(tenant_id: str, request: Request) -> list[dict[st
 async def create_text_knowledge(
     tenant_id: str, payload: KnowledgeTextCreate, request: Request
 ) -> dict[str, object]:
-    require_admin_mode(request)
+    require_csrf(request)
+    await require_tenant_access(request, tenant_id, write=True)
     if await request.app.state.container.tenants.get(tenant_id) is None:
         raise HTTPException(status_code=404, detail="Tenant no encontrado")
     source = KnowledgeSource(
@@ -231,7 +349,8 @@ async def upload_admin_knowledge(
     description: str = Form(default="", max_length=10_000),
     file: UploadFile = File(),
 ) -> dict[str, object]:
-    require_admin_mode(request)
+    require_csrf(request)
+    await require_tenant_access(request, tenant_id, write=True)
     runtime = request.app.state.container
     if await runtime.tenants.get(tenant_id) is None:
         raise HTTPException(status_code=404, detail="Tenant no encontrado")
@@ -273,7 +392,7 @@ async def upload_admin_knowledge(
 async def admin_knowledge_content(
     tenant_id: str, source_id: str, request: Request
 ) -> FileResponse:
-    require_admin_mode(request)
+    await require_tenant_access(request, tenant_id)
     source = await request.app.state.container.knowledge.get(tenant_id, source_id)
     if source is None or not source.storage_key:
         raise HTTPException(status_code=404, detail="Archivo no encontrado")
@@ -288,7 +407,8 @@ async def admin_knowledge_content(
 async def delete_admin_knowledge(
     tenant_id: str, source_id: str, request: Request
 ) -> dict[str, str]:
-    require_admin_mode(request)
+    require_csrf(request)
+    await require_tenant_access(request, tenant_id, write=True)
     runtime = request.app.state.container
     source = await runtime.knowledge.delete(tenant_id, source_id)
     if source is None:
