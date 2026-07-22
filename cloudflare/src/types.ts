@@ -8,7 +8,6 @@ export interface Env {
   WHATSAPP_VERIFY_TOKEN: string;
   GLOBAL_DB: D1Database;
   TENANT_WORKSPACE: DurableObjectNamespace<TenantWorkspace>;
-  KNOWLEDGE_BUCKET: R2Bucket;
   MESSAGE_QUEUE: Queue<WhatsappMessageReceived>;
   KNOWLEDGE_INDEX: VectorizeIndex;
   AI: Ai;
@@ -27,7 +26,6 @@ export interface KnowledgeMetadata {
   id: string;
   tenantId: string;
   title: string;
-  objectKey: string;
   contentType: string;
   characters: number;
   chunks: number;
@@ -37,4 +35,15 @@ export interface KnowledgeMetadata {
 export interface KnowledgeTextInput {
   title: string;
   text: string;
+}
+
+export interface KnowledgeVectorMatch {
+  id: string;
+  score: number;
+  title: string | null;
+}
+
+export interface KnowledgeExcerpt {
+  title: string;
+  excerpt: string;
 }

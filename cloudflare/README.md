@@ -8,11 +8,11 @@ Esta carpeta contiene la primera base **Cloudflare-native** del producto. Conviv
 - D1 para tenants, usuarios, membresías, sesiones y auditoría global.
 - Un Durable Object SQLite por tenant para mensajes, citas y fuentes de conocimiento.
 - Cloudflare Queues con reintentos y Dead Letter Queue.
-- R2 para el contenido original y Vectorize + Workers AI para búsqueda semántica.
+- SQLite privado por tenant para textos y fragmentos, con Vectorize + Workers AI para búsqueda semántica.
 - Firma HMAC del webhook de Meta y secretos fuera del repositorio.
 - Pruebas unitarias y verificación automática en GitHub Actions.
 
-Esta base todavía no reemplaza toda la aplicación Python. La autenticación web, el panel visual, la extracción de PDF/imágenes, el agente conversacional y el envío de respuestas a WhatsApp se migrarán en las siguientes fases.
+Esta base todavía no reemplaza toda la aplicación Python. La autenticación web, el panel visual, la extracción de PDF/imágenes, el agente conversacional y el envío de respuestas a WhatsApp se migrarán en las siguientes fases. No requiere una suscripción de R2: en esta etapa conserva texto y descripciones en SQLite; los binarios grandes necesitarán almacenamiento de objetos más adelante.
 
 ## 1. Instalar y comprobar localmente
 
@@ -25,15 +25,13 @@ cp .dev.vars.example .dev.vars
 npm run check
 ```
 
-Edita `.dev.vars` y sustituye los valores de ejemplo por secretos largos y únicos. El archivo está ignorado por Git. Wrangler puede emular D1, Durable Objects, Queues y R2; Vectorize no tiene emulación local, por lo que los endpoints semánticos requieren el índice remoto.
+Edita `.dev.vars` y sustituye los valores de ejemplo por secretos largos y únicos. El archivo está ignorado por Git. Wrangler puede emular D1, Durable Objects y Queues; Vectorize no tiene emulación local, por lo que los endpoints semánticos requieren el índice remoto.
 
 ## 2. Iniciar sesión y crear los recursos
 
 ```bash
 npm run cf:login
 npx wrangler d1 create serviceflow-global
-npx wrangler r2 bucket create serviceflow-knowledge
-npx wrangler r2 bucket create serviceflow-knowledge-preview
 npx wrangler queues create serviceflow-messages
 npx wrangler queues create serviceflow-messages-dlq
 npx wrangler vectorize create serviceflow-knowledge --dimensions=1024 --metric=cosine
@@ -113,4 +111,4 @@ Meta usará `WHATSAPP_VERIFY_TOKEN` para verificar la URL y `META_APP_SECRET` pa
 
 ## Aislamiento y seguridad
 
-Los registros globales viven en D1. Los datos operativos de cada empresa se almacenan en un Durable Object distinto, identificado por el tenant. Los objetos de R2 llevan un prefijo `tenants/:tenantId/` y toda consulta a Vectorize exige el filtro `tenantId`. El Worker valida la firma de Meta antes de consultar la existencia del tenant, deduplica mensajes dentro de una transacción SQLite y no expone errores internos cuando `APP_ENV=production`.
+Los registros globales viven en D1. Los datos operativos, textos y fragmentos de cada empresa se almacenan en un Durable Object SQLite distinto, identificado por el tenant. Toda consulta a Vectorize exige el filtro `tenantId` y sus resultados se resuelven contra el SQLite del mismo tenant. El Worker valida la firma de Meta antes de consultar la existencia del tenant, deduplica mensajes dentro de una transacción y no expone errores internos cuando `APP_ENV=production`.
