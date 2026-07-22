@@ -1,0 +1,4 @@
+APP_ENV=development
+ADMIN_API_TOKEN=replace-with-a-long-random-token
+META_APP_SECRET=replace-with-your-meta-app-secret
+WHATSAPP_VERIFY_TOKEN=replace-with-your-meta-verification-token

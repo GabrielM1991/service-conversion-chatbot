@@ -1,0 +1,54 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "serviceflow-cloudflare",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-22",
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  "triggers": { "crons": ["0 4 * * *"] },
+  "vars": {
+    "APP_ENV": "production",
+    "EMBEDDING_MODEL": "@cf/qwen/qwen3-embedding-0.6b"
+  },
+  "d1_databases": [
+    {
+      "binding": "GLOBAL_DB",
+      "database_name": "serviceflow-global",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "TENANT_WORKSPACE", "class_name": "TenantWorkspace" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["TenantWorkspace"] }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "KNOWLEDGE_BUCKET",
+      "bucket_name": "serviceflow-knowledge",
+      "preview_bucket_name": "serviceflow-knowledge-preview"
+    }
+  ],
+  "queues": {
+    "producers": [
+      { "binding": "MESSAGE_QUEUE", "queue": "serviceflow-messages" }
+    ],
+    "consumers": [
+      {
+        "queue": "serviceflow-messages",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 3,
+        "dead_letter_queue": "serviceflow-messages-dlq"
+      }
+    ]
+  },
+  "vectorize": [
+    { "binding": "KNOWLEDGE_INDEX", "index_name": "serviceflow-knowledge" }
+  ],
+  "ai": { "binding": "AI" }
+}

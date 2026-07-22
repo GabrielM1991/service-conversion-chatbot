@@ -1,10 +1,23 @@
-# Despliegue de producción con Cloudflare
+# Despliegue y migración a Cloudflare
 
-## Respuesta corta
+El archivo `compose.yaml` describe el entorno local y no se publica directamente en Cloudflare. El repositorio ofrece ahora dos rutas: conservar FastAPI dentro de un Container durante la transición, o migrar progresivamente a la base nativa implementada en [`cloudflare/`](../cloudflare/README.md).
 
-La aplicación puede ejecutarse en producción con Cloudflare, pero el archivo `compose.yaml` actual describe un entorno local y no se despliega directamente. La opción más compatible con el backend actual es ejecutar la imagen de FastAPI en **Cloudflare Containers**, delante de un Worker, y mover los componentes con disco o procesos persistentes a servicios administrados.
+## Base nativa ya implementada
 
-## Arquitectura recomendada
+```text
+WhatsApp / Panel
+       |
+Cloudflare Worker
+       |---- D1 (identidad y auditoría global)
+       |---- Durable Object SQLite por tenant
+       |---- Queue -> consumidor idempotente -> DLQ
+       |---- R2 (fuentes originales)
+       `---- Workers AI -> Vectorize (filtro tenantId)
+```
+
+Esta primera entrega recibe webhooks firmados, publica mensajes sin bloquear la petición, deduplica dentro del espacio privado del tenant y permite guardar/buscar texto de conocimiento. La interfaz, autenticación completa, PDF/imágenes y respuesta saliente del bot permanecen todavía en FastAPI.
+
+## Ruta híbrida con el backend existente
 
 ```text
 Internet / WhatsApp
@@ -16,48 +29,44 @@ Cloudflare Worker (routing y webhooks)
 Cloudflare Container (FastAPI)
         |---------------- PostgreSQL administrado
         |---------------- Cloudflare R2 (PDF e imágenes)
-        |---------------- Cloudflare Queues (eventos asíncronos)
-                                 |
-                         Consumer Worker / Container
+        `---------------- Cloudflare Queues
 ```
 
-### Correspondencia con el entorno local
-
-| Componente local | Producción propuesta |
+| Componente local | Producción híbrida |
 | --- | --- |
 | Contenedor `api` | Cloudflare Container detrás de un Worker |
 | PostgreSQL Docker | PostgreSQL administrado y con TLS |
 | Redis Streams | Cloudflare Queues o Redis administrado durante la transición |
-| Volumen `chatbot_uploads` | Cloudflare R2 mediante API compatible con S3 |
+| Volumen `chatbot_uploads` | Cloudflare R2 |
 | Variables `.env` | Cloudflare Secrets |
 | Worker Python permanente | Consumidor de Cloudflare Queues |
 
 ## Decisiones importantes
 
-- **FastAPI:** Cloudflare documenta soporte de FastAPI en Python Workers, pero Python Workers permanece en beta. Cloudflare Containers ejecuta la imagen Docker existente y es la opción con menos reescritura.
-- **Arquitectura de CPU:** la imagen de Container debe construirse para `linux/amd64`.
-- **Plan:** Containers requiere Workers Paid. Las instancias se inician bajo demanda y su ciclo de vida se controla desde un Worker.
-- **Base de datos:** Cloudflare no sustituye el PostgreSQL relacional de este proyecto. Puede conectarse un PostgreSQL público administrado; Hyperdrive ofrece pool y aceleración para conexiones originadas en Workers.
-- **Archivos:** el disco del Container es efímero. PDF e imágenes deben pasar a R2 antes de producción.
-- **Eventos:** Queues entrega al menos una vez, por lo que debe conservarse la deduplicación por `tenant_id + message_id` ya presente en el dominio.
-- **Secretos:** claves de base de datos, cifrado y proveedores de IA deben configurarse como Secrets, nunca como variables públicas ni archivos versionados.
+- **FastAPI:** Cloudflare documenta FastAPI en Python Workers, pero Python Workers permanece en beta. Containers exige menos reescritura para la ruta híbrida.
+- **Base nativa:** D1 conserva identidad global; cada Durable Object proporciona almacenamiento SQLite privado y consistente para una empresa.
+- **Archivos:** el disco de un Container es efímero. PDF e imágenes deben persistirse en R2.
+- **Eventos:** Queues entrega al menos una vez, por lo que la deduplicación es obligatoria. La base nativa ya la aplica por `tenant + message_id`.
+- **Secretos:** claves de Meta, IA, cifrado y pagos deben configurarse como Secrets, nunca como variables públicas o archivos versionados.
 
-## Ruta de migración
+## Orden de migración recomendado
 
-1. Mantener el backend actual y probar la imagen para `linux/amd64`.
-2. Sustituir `KnowledgeFileStore` por un adaptador R2 compatible con el puerto actual.
-3. Añadir un adaptador de Cloudflare Queues manteniendo Redis como opción local.
-4. Crear el Worker de entrada que enrute tráfico al Container.
-5. Conectar PostgreSQL administrado con TLS y ejecutar `alembic upgrade head` como tarea de despliegue.
-6. Configurar dominio, TLS, WAF, rate limiting del login y secretos.
-7. Probar restauración, observabilidad, webhooks, reintentos y rollback antes de habilitar tráfico real.
+1. Aprovisionar D1, R2, Queues y Vectorize siguiendo el README de `cloudflare/`.
+2. Desplegar el Worker y validar el webhook firmado con un tenant de prueba.
+3. Migrar autenticación y el panel de empresa a páginas servidas por Workers/Assets.
+4. Añadir extracción segura de PDF e imágenes, manteniendo los binarios en R2.
+5. Portar el orquestador, las estrategias y el envío real mediante WhatsApp Cloud API.
+6. Integrar Calendar y pagos con webhooks idempotentes.
+7. Importar datos existentes, probar rollback y cambiar DNS cuando exista paridad funcional.
 
 ## Documentación oficial
 
-- [Cloudflare Containers](https://developers.cloudflare.com/containers/)
-- [FastAPI en Python Workers](https://developers.cloudflare.com/workers/languages/python/packages/fastapi/)
-- [Cloudflare Hyperdrive](https://developers.cloudflare.com/hyperdrive/get-started/)
+- [Cloudflare Workers](https://developers.cloudflare.com/workers/)
+- [Cloudflare D1](https://developers.cloudflare.com/d1/)
+- [Cloudflare Durable Objects](https://developers.cloudflare.com/durable-objects/)
 - [Cloudflare Queues](https://developers.cloudflare.com/queues/)
 - [Garantías de entrega de Queues](https://developers.cloudflare.com/queues/reference/delivery-guarantees/)
-- [Cloudflare R2 con API S3](https://developers.cloudflare.com/r2/get-started/s3/)
+- [Cloudflare R2](https://developers.cloudflare.com/r2/)
+- [Cloudflare Vectorize](https://developers.cloudflare.com/vectorize/)
+- [Workers AI](https://developers.cloudflare.com/workers-ai/)
 - [Cloudflare Secrets](https://developers.cloudflare.com/workers/configuration/secrets/)
