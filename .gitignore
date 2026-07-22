@@ -6,3 +6,7 @@ __pycache__/
 .venv/
 .env
 .DS_Store
+cloudflare/node_modules/
+cloudflare/.wrangler/
+cloudflare/.dev.vars*
+!cloudflare/.dev.vars.example

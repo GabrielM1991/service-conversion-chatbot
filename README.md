@@ -47,9 +47,9 @@ Los binarios se guardan en el volumen `chatbot_uploads` y sus metadatos en Postg
 
 ## Producción con Cloudflare
 
-Sí es posible desplegar el producto usando Cloudflare, pero `docker compose` no se publica directamente. La ruta Cloudflare-native propuesta utiliza un Worker como entrada, un Cloudflare Container para la API existente, PostgreSQL administrado externamente, R2 para archivos y Cloudflare Queues para sustituir Redis Streams. Python Workers soporta FastAPI, pero sigue en beta; para esta base con dependencias nativas se recomienda Container.
+Sí: ya existe una base Cloudflare-native paralela en [`cloudflare/`](cloudflare/README.md). Usa Workers, D1, Durable Objects, Queues, R2, Vectorize y Workers AI, sin depender de Docker, PostgreSQL ni Redis para esos flujos. Incluye recepción firmada de WhatsApp, cola asíncrona, aislamiento por tenant e ingesta/búsqueda semántica de texto.
 
-La estrategia, limitaciones y fases de migración están documentadas en [`docs/cloudflare-production.md`](docs/cloudflare-production.md).
+La aplicación FastAPI sigue siendo la versión funcional completa mientras se migran el panel, autenticación, PDF/imágenes y respuestas del agente. La estrategia, limitaciones y dos rutas de despliegue están documentadas en [`docs/cloudflare-production.md`](docs/cloudflare-production.md).
 
 ## Arquitectura
 
