@@ -4,8 +4,11 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 
-from fastapi import FastAPI, Header, HTTPException, Request, status
+from fastapi import FastAPI, Header, HTTPException, Query, Request, status
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
@@ -37,16 +40,85 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Service Conversion Chatbot",
-    version="0.4.0",
+    version="0.4.1",
     description="Webhook multi-tenant con procesamiento asíncrono y arquitectura hexagonal.",
     lifespan=lifespan,
 )
+
+STATIC_DIR = Path(__file__).parent / "static"
+app.mount("/assets", StaticFiles(directory=STATIC_DIR), name="assets")
 
 
 class WhatsAppWebhook(BaseModel):
     message_id: str = Field(min_length=1)
     from_phone: str = Field(min_length=5)
     text: str = Field(min_length=1, max_length=4096)
+
+
+class DemoTenant(BaseModel):
+    id: str
+    name: str
+    tone: str
+
+
+class DemoMessage(BaseModel):
+    id: str
+    direction: str
+    text: str
+    created_at: datetime
+    intent: str | None = None
+    confidence: float | None = None
+    ai_source: str | None = None
+    requires_human: bool = False
+
+
+def require_demo_mode(request: Request) -> None:
+    if request.app.state.container.app_env != "development":
+        raise HTTPException(status_code=404, detail="Demo no disponible")
+
+
+@app.get("/", include_in_schema=False)
+@app.get("/demo", include_in_schema=False)
+async def demo_page(request: Request) -> FileResponse:
+    require_demo_mode(request)
+    return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/demo/tenants", response_model=list[DemoTenant], include_in_schema=False)
+async def demo_tenants(request: Request) -> list[DemoTenant]:
+    require_demo_mode(request)
+    tenants = await request.app.state.container.tenants.list_active()
+    return [DemoTenant(id=tenant.id, name=tenant.name, tone=tenant.tone) for tenant in tenants]
+
+
+@app.get("/demo/messages", response_model=list[DemoMessage], include_in_schema=False)
+async def demo_messages(
+    request: Request,
+    phone: str = Query(min_length=5, max_length=32),
+    x_tenant_id: str | None = Header(default=None),
+) -> list[DemoMessage]:
+    require_demo_mode(request)
+    if not x_tenant_id:
+        raise HTTPException(status_code=400, detail="Falta el header X-Tenant-ID")
+    tenant = await request.app.state.container.tenants.get(x_tenant_id)
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Tenant no encontrado")
+    entries = await request.app.state.container.conversations.list_recent(
+        x_tenant_id, phone, limit=80
+    )
+    return [
+        DemoMessage(
+            id=entry.id,
+            direction=entry.direction,
+            text=entry.text,
+            created_at=entry.created_at,
+            intent=entry.intent,
+            confidence=entry.confidence,
+            ai_source=entry.ai_source,
+            requires_human=entry.requires_human,
+        )
+        for entry in entries
+    ]
 
 
 @app.get("/health")

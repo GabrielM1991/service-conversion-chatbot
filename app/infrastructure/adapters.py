@@ -1,10 +1,19 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from dataclasses import replace
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
-from app.domain.models import IncomingMessage, Intent, IntentResult, OutgoingMessage, Tenant, TimeSlot
+from app.domain.models import (
+    ConversationEntry,
+    IncomingMessage,
+    Intent,
+    IntentResult,
+    OutgoingMessage,
+    Tenant,
+    TimeSlot,
+)
 from app.domain.ports import IntentClassifier
 
 logger = logging.getLogger("chatbot")
@@ -16,6 +25,9 @@ class InMemoryTenantRepository:
 
     async def get(self, tenant_id: str) -> Tenant | None:
         return self._tenants.get(tenant_id)
+
+    async def list_active(self) -> list[Tenant]:
+        return list(self._tenants.values())
 
 
 class InMemoryDeduplicationStore:
@@ -146,11 +158,45 @@ class ConsoleChatGateway:
         )
 
 
-class NoOpConversationRepository:
+class InMemoryConversationRepository:
+    def __init__(self) -> None:
+        self._messages: dict[tuple[str, str], list[ConversationEntry]] = {}
+
     async def record_incoming(self, message: IncomingMessage) -> None:
-        return None
+        entries = self._messages.setdefault(
+            (message.tenant_id, message.customer_phone), []
+        )
+        if any(entry.id == message.message_id for entry in entries):
+            return
+        entries.append(
+            ConversationEntry(
+                id=message.message_id,
+                direction="inbound",
+                text=message.text,
+                created_at=message.received_at,
+            )
+        )
 
     async def record_outgoing(
         self, incoming: IncomingMessage, outgoing: OutgoingMessage, intent: IntentResult
     ) -> None:
-        return None
+        entries = self._messages.setdefault(
+            (incoming.tenant_id, incoming.customer_phone), []
+        )
+        entries.append(
+            ConversationEntry(
+                id=f"out:{uuid.uuid4()}",
+                direction="outbound",
+                text=outgoing.text,
+                created_at=datetime.now(timezone.utc),
+                intent=intent.intent.value,
+                confidence=intent.confidence,
+                ai_source=intent.source,
+                requires_human=intent.requires_human,
+            )
+        )
+
+    async def list_recent(
+        self, tenant_id: str, phone: str, limit: int = 50
+    ) -> list[ConversationEntry]:
+        return self._messages.get((tenant_id, phone), [])[-limit:]

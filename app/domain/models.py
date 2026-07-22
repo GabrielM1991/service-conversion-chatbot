@@ -57,3 +57,15 @@ class OutgoingMessage:
     tenant_id: str
     customer_phone: str
     text: str
+
+
+@dataclass(frozen=True, slots=True)
+class ConversationEntry:
+    id: str
+    direction: str
+    text: str
+    created_at: datetime
+    intent: str | None = None
+    confidence: float | None = None
+    ai_source: str | None = None
+    requires_human: bool = False

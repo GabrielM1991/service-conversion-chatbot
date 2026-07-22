@@ -1,6 +1,6 @@
 [project]
 name = "service-conversion-chatbot"
-version = "0.4.0"
+version = "0.4.1"
 description = "SaaS multi-tenant para cualificacion, agendamiento y conversion por chat"
 requires-python = ">=3.11"
 dependencies = [
