@@ -10,9 +10,11 @@ Esta carpeta contiene la primera base **Cloudflare-native** del producto. Conviv
 - Cloudflare Queues con reintentos y Dead Letter Queue.
 - SQLite privado por tenant para textos y fragmentos, con Vectorize + Workers AI para búsqueda semántica.
 - Firma HMAC del webhook de Meta y secretos fuera del repositorio.
+- Panel web responsive con propietarios, sesiones, roles y protección CSRF.
+- Configuración del nombre, tono, bienvenida e instrucciones del bot.
 - Pruebas unitarias y verificación automática en GitHub Actions.
 
-Esta base todavía no reemplaza toda la aplicación Python. La autenticación web, el panel visual, la extracción de PDF/imágenes, el agente conversacional y el envío de respuestas a WhatsApp se migrarán en las siguientes fases. No requiere una suscripción de R2: en esta etapa conserva texto y descripciones en SQLite; los binarios grandes necesitarán almacenamiento de objetos más adelante.
+Esta base todavía no reemplaza toda la aplicación Python. La extracción de PDF/imágenes, el agente conversacional, proveedores de IA externos y el envío de respuestas a WhatsApp se migrarán en las siguientes fases. No requiere una suscripción de R2: en esta etapa conserva texto y descripciones en SQLite; los binarios grandes necesitarán almacenamiento de objetos más adelante.
 
 ## 1. Instalar y comprobar localmente
 
@@ -81,7 +83,18 @@ npm run deploy
 
 ## 6. Crear el primer tenant
 
-Sustituye la URL y el token sin guardar el token en el historial del repositorio:
+Abre `/setup` en el navegador, por ejemplo:
+
+```text
+https://TU-WORKER.workers.dev/setup
+```
+
+Introduce `ADMIN_API_TOKEN`, el identificador y nombre de la empresa y el correo del propietario. El sistema mostrará una clave `sf_live_...` una sola vez. Guárdala en un gestor de contraseñas y úsala junto al correo en `/login`.
+
+Las claves de acceso tienen 256 bits aleatorios y solo se conserva su hash SHA-256. Esto evita una operación costosa de contraseña incompatible con el límite de CPU del plan Workers Free. Las sesiones se guardan como hash, vencen tras 12 horas y usan cookies `HttpOnly`, `Secure` y `SameSite=Strict`.
+
+También se conserva el endpoint administrativo para automatización. Sustituye la URL y el token sin guardar el token en el historial del repositorio:
+
 
 ```bash
 curl -X POST https://TU-WORKER.workers.dev/internal/tenants \
@@ -103,12 +116,18 @@ Meta usará `WHATSAPP_VERIFY_TOKEN` para verificar la URL y `META_APP_SECRET` pa
 | Método | Ruta | Protección | Uso |
 |---|---|---|---|
 | `GET` | `/health` | pública | Estado de Worker y D1 |
+| `GET` | `/setup` | pública; alta protegida por token | Crear el primer propietario |
+| `GET` | `/login` | pública | Iniciar sesión con correo y clave de acceso |
+| `GET` | `/admin` | cookie de sesión | Panel de cada empresa |
+| `GET` | `/api/session` | cookie de sesión | Usuario y membresías activas |
 | `POST` | `/internal/tenants` | token administrador | Crear o reactivar tenant |
 | `GET/POST` | `/webhooks/whatsapp/:tenantId` | token de verificación/firma Meta | Verificar y recibir mensajes |
-| `POST` | `/api/tenants/:tenantId/knowledge/text` | token administrador | Guardar y vectorizar texto |
-| `POST` | `/api/tenants/:tenantId/knowledge/search` | token administrador | Buscar contexto del tenant |
-| `GET` | `/api/tenants/:tenantId/summary` | token administrador | Consultar contadores privados |
+| `POST` | `/api/tenants/:tenantId/knowledge/text` | sesión/membresía o token administrador | Guardar y vectorizar texto |
+| `POST` | `/api/tenants/:tenantId/knowledge/search` | sesión/membresía o token administrador | Buscar contexto del tenant |
+| `GET/DELETE` | `/api/tenants/:tenantId/knowledge[/sourceId]` | sesión y membresía | Listar o eliminar fuentes |
+| `GET/PUT` | `/api/tenants/:tenantId/settings` | sesión y membresía | Configurar personalidad del bot |
+| `GET` | `/api/tenants/:tenantId/summary` | sesión/membresía o token administrador | Consultar contadores privados |
 
 ## Aislamiento y seguridad
 
-Los registros globales viven en D1. Los datos operativos, textos y fragmentos de cada empresa se almacenan en un Durable Object SQLite distinto, identificado por el tenant. Toda consulta a Vectorize exige el filtro `tenantId` y sus resultados se resuelven contra el SQLite del mismo tenant. El Worker valida la firma de Meta antes de consultar la existencia del tenant, deduplica mensajes dentro de una transacción y no expone errores internos cuando `APP_ENV=production`.
+Los registros globales viven en D1. Los datos operativos, textos y fragmentos de cada empresa se almacenan en un Durable Object SQLite distinto, identificado por el tenant. Toda consulta a Vectorize exige el filtro `tenantId` y sus resultados se resuelven contra el SQLite del mismo tenant. Cada endpoint del panel vuelve a comprobar la membresía y el rol en el servidor; ocultar botones en la interfaz no se considera autorización. El Worker valida CSRF, origen, firma de Meta y deduplicación transaccional, y no expone errores internos cuando `APP_ENV=production`.
