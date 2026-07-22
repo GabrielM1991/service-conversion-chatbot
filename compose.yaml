@@ -15,20 +15,57 @@ services:
       timeout: 3s
       retries: 15
 
+  redis:
+    image: redis:7.4-alpine
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - chatbot_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+
   api:
     build: .
     environment:
       APP_ENV: development
       DATABASE_URL: postgresql+asyncpg://chatbot:chatbot@postgres:5432/chatbot
+      REDIS_URL: redis://redis:6379/0
     ports:
       - "8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready')"]
+      interval: 10s
+      timeout: 3s
+      retries: 15
     command: >-
       sh -c "alembic upgrade head && python -m app.infrastructure.seed &&
       uvicorn app.main:app --host 0.0.0.0 --port 8000"
 
+  worker:
+    build: .
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgresql+asyncpg://chatbot:chatbot@postgres:5432/chatbot
+      REDIS_URL: redis://redis:6379/0
+      CONSUMER_GROUP: chatbot_workers
+      MAX_EVENT_RETRIES: 3
+    depends_on:
+      api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: python -m app.worker
+    restart: unless-stopped
+
 volumes:
   chatbot_postgres_data:
-
+  chatbot_redis_data:

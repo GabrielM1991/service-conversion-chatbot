@@ -14,6 +14,8 @@ from app.infrastructure.repositories import (
     SqlAlchemyConversationRepository,
     SqlAlchemyTenantRepository,
 )
+from app.infrastructure.event_bus import RedisStreamEventBus
+from app.infrastructure.redis_adapters import RedisDeduplicationStore
 
 
 class RecordingConversationRepository:
@@ -94,5 +96,17 @@ async def test_postgres_configuration_selects_sqlalchemy_adapters_without_connec
         assert container.storage_mode == "postgresql"
         assert isinstance(container.tenants, SqlAlchemyTenantRepository)
         assert isinstance(container.conversations, SqlAlchemyConversationRepository)
+    finally:
+        await container.close()
+
+
+@pytest.mark.asyncio
+async def test_redis_configuration_separates_worker_and_uses_durable_adapters() -> None:
+    container = build_container(Settings(redis_url="redis://localhost:6379/15"))
+    try:
+        assert container.broker_mode == "redis-streams"
+        assert container.embedded_worker is False
+        assert isinstance(container.event_bus, RedisStreamEventBus)
+        assert isinstance(container.deduplication, RedisDeduplicationStore)
     finally:
         await container.close()

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from fastapi import FastAPI, Header, HTTPException, Request, status
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 
 from app.bootstrap import build_container
 from app.domain.models import IncomingMessage
@@ -19,19 +20,24 @@ container = build_container()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    worker = asyncio.create_task(container.event_bus.consume_forever(container.processor))
+    worker = (
+        asyncio.create_task(container.event_bus.consume_forever(container.processor))
+        if container.embedded_worker
+        else None
+    )
     app.state.container = container
     try:
         yield
     finally:
-        worker.cancel()
-        await asyncio.gather(worker, return_exceptions=True)
+        if worker is not None:
+            worker.cancel()
+            await asyncio.gather(worker, return_exceptions=True)
         await container.close()
 
 
 app = FastAPI(
     title="Service Conversion Chatbot",
-    version="0.2.0",
+    version="0.3.0",
     description="Webhook multi-tenant con procesamiento asíncrono y arquitectura hexagonal.",
     lifespan=lifespan,
 )
@@ -45,7 +51,26 @@ class WhatsAppWebhook(BaseModel):
 
 @app.get("/health")
 async def health(request: Request) -> dict[str, str]:
-    return {"status": "ok", "storage": request.app.state.container.storage_mode}
+    runtime = request.app.state.container
+    return {"status": "ok", "storage": runtime.storage_mode, "broker": runtime.broker_mode}
+
+
+@app.get("/ready")
+async def ready(request: Request) -> dict[str, str]:
+    runtime = request.app.state.container
+    try:
+        if runtime.database_engine is not None:
+            async with runtime.database_engine.connect() as connection:
+                await connection.execute(text("SELECT 1"))
+        if runtime.redis_client is not None:
+            await runtime.redis_client.ping()
+    except Exception as error:
+        logger.exception(
+            "Dependencia no disponible durante readiness",
+            extra={"component": "Readiness", "tenant": "-"},
+        )
+        raise HTTPException(status_code=503, detail="Dependencia no disponible") from error
+    return {"status": "ready"}
 
 
 @app.post("/webhooks/whatsapp", status_code=status.HTTP_202_ACCEPTED)
@@ -60,6 +85,15 @@ async def whatsapp_webhook(
     tenant = await runtime.tenants.get(x_tenant_id)
     if tenant is None:
         raise HTTPException(status_code=404, detail="Tenant no encontrado")
+    if not runtime.embedded_worker:
+        is_new = await runtime.deduplication.mark_if_new(x_tenant_id, payload.message_id)
+        if not is_new:
+            logger.info(
+                "Webhook duplicado aceptado sin reencolar: %s",
+                payload.message_id,
+                extra={"component": "RedisDeduplication", "tenant": x_tenant_id},
+            )
+            return {"status": "accepted", "message_id": payload.message_id}
     message = IncomingMessage(
         message_id=payload.message_id,
         tenant_id=x_tenant_id,
