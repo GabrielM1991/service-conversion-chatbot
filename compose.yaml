@@ -34,6 +34,10 @@ services:
       APP_ENV: development
       DATABASE_URL: postgresql+asyncpg://chatbot:chatbot@postgres:5432/chatbot
       REDIS_URL: redis://redis:6379/0
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.6-sol}
+      OPENAI_PROMPT_VERSION: ${OPENAI_PROMPT_VERSION:-intent-router-v1}
+      LLM_MINIMUM_CONFIDENCE: ${LLM_MINIMUM_CONFIDENCE:-0.72}
     ports:
       - "8000:8000"
     depends_on:
@@ -58,6 +62,10 @@ services:
       REDIS_URL: redis://redis:6379/0
       CONSUMER_GROUP: chatbot_workers
       MAX_EVENT_RETRIES: 3
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.6-sol}
+      OPENAI_PROMPT_VERSION: ${OPENAI_PROMPT_VERSION:-intent-router-v1}
+      LLM_MINIMUM_CONFIDENCE: ${LLM_MINIMUM_CONFIDENCE:-0.72}
     depends_on:
       api:
         condition: service_healthy

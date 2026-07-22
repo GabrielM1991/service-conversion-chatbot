@@ -13,6 +13,7 @@ from app.application.services import ChatbotAgentFactory, ProcessIncomingMessage
 from app.application.strategies import (
     BookAppointmentStrategy,
     FaqResponseStrategy,
+    HumanHandoffStrategy,
     ProcessPaymentStrategy,
     UnknownIntentStrategy,
 )
@@ -28,9 +29,11 @@ from app.infrastructure.adapters import (
     InMemoryTenantRepository,
     KeywordIntentClassifier,
     NoOpConversationRepository,
+    ResilientIntentClassifier,
 )
 from app.infrastructure.database import create_database_engine, create_session_factory
 from app.infrastructure.event_bus import InMemoryEventBus, MessageEventBus, RedisStreamEventBus
+from app.infrastructure.openai_adapter import OpenAIIntentClassifier
 from app.infrastructure.redis_adapters import RedisDeduplicationStore, RedisOptOutStore
 from app.infrastructure.repositories import (
     SqlAlchemyConversationRepository,
@@ -48,15 +51,19 @@ class Container:
     deduplication: DeduplicationStore
     storage_mode: str
     broker_mode: str
+    ai_mode: str
     embedded_worker: bool
     database_engine: AsyncEngine | None = None
     redis_client: Redis | None = None
+    openai_classifier: OpenAIIntentClassifier | None = None
 
     async def close(self) -> None:
         if self.database_engine is not None:
             await self.database_engine.dispose()
         if self.redis_client is not None:
             await self.redis_client.aclose()
+        if self.openai_classifier is not None:
+            await self.openai_classifier.close()
 
 
 def build_container(
@@ -126,7 +133,23 @@ def build_container(
     chat = ConsoleChatGateway()
     calendar = FakeCalendarGateway()
     payments = FakePaymentGateway()
-    classifier = KeywordIntentClassifier()
+    local_classifier = KeywordIntentClassifier()
+    openai_classifier: OpenAIIntentClassifier | None = None
+    if runtime_settings.openai_api_key:
+        openai_classifier = OpenAIIntentClassifier(
+            api_key=runtime_settings.openai_api_key,
+            model=runtime_settings.openai_model,
+            prompt_version=runtime_settings.openai_prompt_version,
+        )
+        classifier = ResilientIntentClassifier(
+            openai_classifier,
+            local_classifier,
+            runtime_settings.llm_minimum_confidence,
+        )
+        ai_mode = "openai-with-fallback"
+    else:
+        classifier = local_classifier
+        ai_mode = "rules"
     fallback = UnknownIntentStrategy()
     factory = ChatbotAgentFactory(
         tenants,
@@ -135,6 +158,7 @@ def build_container(
             BookAppointmentStrategy(calendar),
             FaqResponseStrategy(),
             ProcessPaymentStrategy(payments),
+            HumanHandoffStrategy(),
         ],
         fallback,
         chat,
@@ -150,7 +174,9 @@ def build_container(
         dedupe,
         storage_mode,
         broker_mode,
+        ai_mode,
         embedded_worker,
         engine,
         redis_client,
+        openai_classifier,
     )

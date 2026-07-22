@@ -28,13 +28,28 @@ class ChatbotAgent:
         self._conversations = conversations
 
     async def handle(self, message: IncomingMessage) -> None:
-        result = await self._classifier.classify(message.text, self._tenant)
+        result = await self._classifier.classify(
+            message.text, self._tenant, customer_phone=message.customer_phone
+        )
         logger.debug(
-            "Intención detectada: '%s'. Servicio: '%s'.",
+            "Intención detectada: '%s'. Servicio: '%s'. Confianza: %.2f. Fuente: %s.",
             result.intent,
             result.service,
+            result.confidence,
+            result.source,
             extra={"component": "IA_Agent", "tenant": self._tenant.id},
         )
+        if result.model:
+            logger.info(
+                "Clasificación IA completada. Modelo=%s Prompt=%s Tokens=%s/%s LatenciaMs=%s Fallback=%s",
+                result.model,
+                result.prompt_version,
+                result.input_tokens,
+                result.output_tokens,
+                result.latency_ms,
+                result.fallback_used,
+                extra={"component": "AIObservability", "tenant": self._tenant.id},
+            )
         strategy = self._strategies.get(result.intent.value, self._fallback)
         outgoing = await strategy.execute(message, self._tenant, result)
         await self._conversations.record_outgoing(message, outgoing, result)

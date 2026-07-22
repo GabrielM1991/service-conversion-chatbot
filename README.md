@@ -1,6 +1,6 @@
 # Plataforma de Conversión y Agendamiento Automatizado
 
-Chatbot SaaS multi-tenant para empresas de servicios. El webhook deduplica y publica cada mensaje en Redis Streams; un worker independiente ejecuta el pipeline, clasifica la intención, selecciona una estrategia y persiste la conversación sin mezclar datos entre negocios.
+Chatbot SaaS multi-tenant para empresas de servicios. El webhook deduplica y publica cada mensaje en Redis Streams; un worker independiente ejecuta el pipeline, clasifica la intención con salida estructurada, selecciona una estrategia y persiste la conversación sin mezclar datos entre negocios.
 
 ## Arquitectura
 
@@ -8,6 +8,9 @@ Chatbot SaaS multi-tenant para empresas de servicios. El webhook deduplica y pub
 WhatsApp webhook -> Redis Stream -> Consumer Group -> Worker
                                                     -> MessagePipeline
                                                     -> ChatbotAgentFactory
+                                                    -> OpenAI Structured Output
+                                                       -> confidence guardrail
+                                                       -> deterministic fallback
                                                     -> IntentStrategy
                                                     -> Calendar / Payment / Chat ports
                                       failures -> Retry -> Dead Letter Queue
@@ -15,7 +18,7 @@ WhatsApp webhook -> Redis Stream -> Consumer Group -> Worker
 
 - `app/domain`: entidades y puertos sin dependencias de frameworks.
 - `app/application`: casos de uso, Chain of Responsibility, Factory y Strategy.
-- `app/infrastructure`: adaptadores sustituibles; en esta fase son locales y deterministas.
+- `app/infrastructure`: adaptadores sustituibles para OpenAI, Redis, PostgreSQL y servicios fake.
 - `app/worker.py`: consumidor independiente del proceso HTTP.
 - `app/main.py`: adaptador HTTP de FastAPI y ciclo de vida del worker.
 - `migrations`: esquema PostgreSQL versionado y políticas Row-Level Security.
@@ -27,6 +30,8 @@ Los límites hexagonales permiten cambiar cada fake por Redis, RabbitMQ, Google 
 - **Memoria:** inicio rápido sin infraestructura; API y worker comparten una cola local.
 - **PostgreSQL:** persistencia de tenants, servicios, clientes, conversaciones, mensajes y citas. Se activa con `DATABASE_URL`.
 - **Redis Streams:** cola durable, deduplicación y opt-out persistentes. Se activa con `REDIS_URL` y separa API/worker.
+- **IA local:** clasificador determinista disponible sin credenciales ni conexión externa.
+- **OpenAI:** Responses API con Structured Outputs, prompt dinámico por tenant y fallback local automático.
 
 ## Inicio rápido en memoria
 
@@ -51,8 +56,39 @@ La API devuelve `202 Accepted` sin esperar a la IA ni al calendario. La document
 El endpoint `GET /health` indica qué adaptador está activo:
 
 ```json
-{"status":"ok","storage":"memory","broker":"memory"}
+{"status":"ok","storage":"memory","broker":"memory","ai":"rules"}
 ```
+
+## Activar la IA real
+
+El proyecto funciona sin una clave. Para activar OpenAI, define la variable únicamente en tu terminal; nunca la escribas en el código, en `.env.example` ni la subas a GitHub:
+
+```bash
+export OPENAI_API_KEY='tu-clave-de-openai'
+docker compose up --build
+```
+
+Opcionalmente puedes cambiar el modelo, la versión lógica del prompt y el umbral de confianza:
+
+```bash
+export OPENAI_MODEL='gpt-5.6-sol'
+export OPENAI_PROMPT_VERSION='intent-router-v1'
+export LLM_MINIMUM_CONFIDENCE='0.72'
+```
+
+Con clave configurada, `/health` muestra `"ai":"openai-with-fallback"`. Sin clave muestra `"ai":"rules"`.
+
+El adaptador usa la [Responses API](https://developers.openai.com/api/docs/guides/migrate-to-responses) y salida Pydantic estricta. Para cada tenant construye las instrucciones con su nombre, tono, catálogo y conocimiento. El mensaje del cliente se delimita como dato no confiable y la respuesta se valida antes de escoger una estrategia.
+
+Guardrails incorporados:
+
+- conjunto cerrado de intenciones y confianza entre `0` y `1`;
+- rechazo de servicios que no pertenezcan al tenant;
+- derivación humana explícita o por confianza insuficiente;
+- `safety_identifier` estable y seudónimo, sin enviar el teléfono como identificador;
+- `store=False` para no solicitar almacenamiento de la respuesta;
+- timeout, un reintento del SDK y fallback determinista ante fallo del proveedor;
+- el webhook y el worker continúan funcionando aunque no exista una clave.
 
 ## Ejecutar con PostgreSQL y Docker
 
@@ -65,7 +101,7 @@ docker compose up --build
 Cuando aparezcan la API y el worker como activos, abre `http://127.0.0.1:8000/docs`. En este modo `/health` devuelve:
 
 ```json
-{"status":"ok","storage":"postgresql","broker":"redis-streams"}
+{"status":"ok","storage":"postgresql","broker":"redis-streams","ai":"rules"}
 ```
 
 `GET /ready` comprueba realmente PostgreSQL y Redis y devuelve `503` si una dependencia no está disponible.
@@ -120,6 +156,8 @@ La migración inicial crea:
 - `customers`, `conversations` y `messages` para la trazabilidad del chat;
 - `appointments` para reservas, calendario y referencia de pago.
 
+Las respuestas salientes también conservan la fuente de clasificación, modelo, versión del prompt, confianza, necesidad de intervención humana, tokens de entrada/salida, latencia y uso del fallback. No se fija un costo monetario en código porque las tarifas pueden cambiar; los tokens permiten calcularlo externamente con la tarifa vigente.
+
 Para ejecutar manualmente las migraciones fuera de Docker:
 
 ```bash
@@ -135,11 +173,10 @@ python -m unittest discover -s tests -v
 # o pytest, si instalaste las dependencias de desarrollo
 ```
 
-Cubren agendamiento, idempotencia, opt-out, selección de adaptadores, persistencia del flujo y restricciones multi-tenant.
+Cubren agendamiento, idempotencia, opt-out, selección de adaptadores, salida estructurada, prompts dinámicos, normalización de servicios, fallback, confianza, derivación humana, persistencia y restricciones multi-tenant.
 
 ## Próximas fases
 
-1. Adaptador LLM con salida estructurada y guardrails.
-2. Google/Outlook Calendar y prevención transaccional de dobles reservas.
-3. Stripe/Mercado Pago mediante webhooks firmados.
-4. WhatsApp Cloud API real, observabilidad y panel administrativo.
+1. Google/Outlook Calendar y prevención transaccional de dobles reservas.
+2. Stripe/Mercado Pago mediante webhooks firmados.
+3. WhatsApp Cloud API real, métricas agregadas y panel administrativo.

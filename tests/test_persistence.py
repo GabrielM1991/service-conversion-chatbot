@@ -85,6 +85,17 @@ def test_cross_tenant_links_and_provider_ids_have_composite_guards() -> None:
     }
     assert "uq_messages_provider_id" in unique_names
     assert "ck_messages_direction" in check_names
+    assert {
+        "intent_confidence",
+        "requires_human",
+        "ai_source",
+        "ai_model",
+        "prompt_version",
+        "input_tokens",
+        "output_tokens",
+        "ai_latency_ms",
+        "fallback_used",
+    }.issubset(messages.columns.keys())
 
 
 @pytest.mark.asyncio
@@ -108,5 +119,14 @@ async def test_redis_configuration_separates_worker_and_uses_durable_adapters() 
         assert container.embedded_worker is False
         assert isinstance(container.event_bus, RedisStreamEventBus)
         assert isinstance(container.deduplication, RedisDeduplicationStore)
+    finally:
+        await container.close()
+
+
+@pytest.mark.asyncio
+async def test_openai_configuration_enables_resilient_llm_mode_without_network_call() -> None:
+    container = build_container(Settings(openai_api_key="test-key"))
+    try:
+        assert container.ai_mode == "openai-with-fallback"
     finally:
         await container.close()

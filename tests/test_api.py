@@ -24,7 +24,12 @@ def test_health_reports_active_storage_adapter() -> None:
         response = client.get("/health")
 
         assert response.status_code == 200
-        assert response.json() == {"status": "ok", "storage": "memory", "broker": "memory"}
+        assert response.json() == {
+            "status": "ok",
+            "storage": "memory",
+            "broker": "memory",
+            "ai": "rules",
+        }
 
 
 def test_ready_succeeds_without_external_dependencies_in_memory_mode() -> None:

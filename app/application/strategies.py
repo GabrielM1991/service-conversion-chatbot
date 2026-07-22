@@ -66,8 +66,8 @@ class ProcessPaymentStrategy(IntentStrategy):
         )
 
 
-class UnknownIntentStrategy(IntentStrategy):
-    intent = Intent.UNKNOWN
+class HumanHandoffStrategy(IntentStrategy):
+    intent = Intent.HUMAN_HANDOFF
 
     async def execute(
         self, message: IncomingMessage, tenant: Tenant, result: IntentResult
@@ -75,6 +75,24 @@ class UnknownIntentStrategy(IntentStrategy):
         return OutgoingMessage(
             tenant.id,
             message.customer_phone,
-            f"Hola, soy el asistente de {tenant.name}. ¿Buscas información o quieres agendar?",
+            "Quiero asegurarme de ayudarte correctamente. Un asesor humano continuará contigo pronto.",
         )
 
+
+class UnknownIntentStrategy(IntentStrategy):
+    intent = Intent.UNKNOWN
+
+    async def execute(
+        self, message: IncomingMessage, tenant: Tenant, result: IntentResult
+    ) -> OutgoingMessage:
+        if result.requires_human:
+            return OutgoingMessage(
+                tenant.id,
+                message.customer_phone,
+                "No tengo suficiente certeza para responderte bien. Un asesor humano continuará contigo pronto.",
+            )
+        return OutgoingMessage(
+            tenant.id,
+            message.customer_phone,
+            f"Hola, soy el asistente de {tenant.name}. ¿Buscas información o quieres agendar?",
+        )

@@ -9,6 +9,7 @@ class Intent(StrEnum):
     BOOK_APPOINTMENT = "agendar_cita"
     FAQ = "pregunta_frecuente"
     PROCESS_PAYMENT = "procesar_pago"
+    HUMAN_HANDOFF = "derivar_humano"
     UNKNOWN = "desconocida"
 
 
@@ -35,6 +36,14 @@ class IntentResult:
     intent: Intent
     service: str | None = None
     confidence: float = 0.0
+    requires_human: bool = False
+    source: str = "rules"
+    model: str | None = None
+    prompt_version: str | None = None
+    input_tokens: int = 0
+    output_tokens: int = 0
+    latency_ms: int = 0
+    fallback_used: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,4 +57,3 @@ class OutgoingMessage:
     tenant_id: str
     customer_phone: str
     text: str
-
