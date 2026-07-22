@@ -20,6 +20,7 @@ from app.application.strategies import (
 from app.config import Settings, load_settings
 from app.domain.models import Tenant
 from app.domain.ports import (
+    AuthRepository,
     AIConfigurationRepository,
     ConversationRepository,
     DeduplicationStore,
@@ -38,11 +39,13 @@ from app.infrastructure.adapters import (
     InMemoryTenantRepository,
     KeywordIntentClassifier,
 )
+from app.infrastructure.auth import InMemoryAuthRepository, PasswordService, demo_user
 from app.infrastructure.database import create_database_engine, create_session_factory
 from app.infrastructure.event_bus import InMemoryEventBus, MessageEventBus, RedisStreamEventBus
 from app.infrastructure.knowledge import KnowledgeFileStore
 from app.infrastructure.redis_adapters import RedisDeduplicationStore, RedisOptOutStore
 from app.infrastructure.repositories import (
+    SqlAlchemyAuthRepository,
     SqlAlchemyAIConfigurationRepository,
     SqlAlchemyConversationRepository,
     SqlAlchemyKnowledgeRepository,
@@ -70,6 +73,10 @@ class Container:
     app_env: str
     embedded_worker: bool
     max_upload_bytes: int
+    auth: AuthRepository
+    passwords: PasswordService
+    session_ttl_hours: int
+    cookie_secure: bool
     database_engine: AsyncEngine | None = None
     redis_client: Redis | None = None
 
@@ -86,6 +93,7 @@ def build_container(
 ) -> Container:
     runtime_settings = settings or load_settings()
     engine: AsyncEngine | None = None
+    passwords = PasswordService()
     if runtime_settings.database_url:
         engine = create_database_engine(runtime_settings.database_url)
         session_factory = create_session_factory(engine)
@@ -95,6 +103,7 @@ def build_container(
             session_factory
         )
         knowledge: KnowledgeRepository = SqlAlchemyKnowledgeRepository(session_factory)
+        auth: AuthRepository = SqlAlchemyAuthRepository(session_factory)
         storage_mode = "postgresql"
     else:
         tenants = InMemoryTenantRepository(
@@ -118,6 +127,15 @@ def build_container(
         conversations = InMemoryConversationRepository()
         ai_configurations = InMemoryAIConfigurationRepository()
         knowledge = InMemoryKnowledgeRepository()
+        auth = InMemoryAuthRepository(
+            [
+                demo_user(
+                    passwords,
+                    runtime_settings.bootstrap_admin_email,
+                    runtime_settings.bootstrap_admin_password,
+                )
+            ]
+        )
         storage_mode = "memory"
     if conversations_override is not None:
         conversations = conversations_override
@@ -198,6 +216,10 @@ def build_container(
         runtime_settings.app_env,
         embedded_worker,
         runtime_settings.max_upload_bytes,
+        auth,
+        passwords,
+        runtime_settings.session_ttl_hours,
+        runtime_settings.app_env != "development",
         engine,
         redis_client,
     )

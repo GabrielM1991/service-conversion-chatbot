@@ -96,3 +96,25 @@ class KnowledgeSource:
     size_bytes: int = 0
     storage_key: str | None = None
     extracted_text: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class TenantMembership:
+    tenant_id: str
+    role: str
+
+
+@dataclass(frozen=True, slots=True)
+class UserAccount:
+    id: str
+    email: str
+    password_hash: str
+    memberships: tuple[TenantMembership, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class AuthenticatedUser:
+    id: str
+    email: str
+    memberships: tuple[TenantMembership, ...]
+    session_id: str

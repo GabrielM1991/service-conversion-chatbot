@@ -1,5 +1,5 @@
 const $ = (selector) => document.querySelector(selector);
-const state = { tenants: [], tenantId: "", settings: null, sources: [] };
+const state = { user: null, tenants: [], tenantId: "", settings: null, sources: [] };
 const fields = {
   tenant: $("#tenant-select"), business: $("#business-name"), bot: $("#bot-name"),
   tone: $("#tone"), welcome: $("#welcome"), instructions: $("#instructions"),
@@ -7,12 +7,27 @@ const fields = {
 };
 
 async function api(url, options = {}) {
-  const response = await fetch(url, { cache: "no-store", ...options });
+  const method = (options.method || "GET").toUpperCase();
+  const headers = new Headers(options.headers || {});
+  if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
+    const csrf = document.cookie.split("; ").find((item) => item.startsWith("serviceflow_csrf="))?.split("=")[1];
+    if (csrf) headers.set("X-CSRF-Token", decodeURIComponent(csrf));
+  }
+  const response = await fetch(url, { cache: "no-store", ...options, headers });
+  if (response.status === 401) {
+    window.location.assign("/login");
+    throw new Error("Tu sesión terminó. Inicia sesión nuevamente.");
+  }
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
     throw new Error(payload.detail || "No fue posible completar la operación");
   }
   return response.status === 204 ? null : response.json();
+}
+
+async function loadUser() {
+  state.user = await api("/auth/me");
+  $("#user-email").textContent = state.user.email;
 }
 
 function toast(message, error = false) {
@@ -41,6 +56,11 @@ async function loadSettings() {
   $("#bot-summary").textContent = state.settings.bot_name; $("#provider-summary").textContent = state.settings.provider === "openai" ? "OpenAI" : state.settings.provider;
   $("#key-status").textContent = state.settings.api_key_configured ? `Credencial guardada: ${state.settings.api_key_hint}` : "Todavía no hay una credencial propia configurada.";
   $("#encryption-warning").hidden = state.settings.encryption_available;
+  const readonly = state.settings.role === "viewer";
+  document.body.classList.toggle("readonly", readonly);
+  $("#readonly-banner").hidden = !readonly;
+  $("#active-role").textContent = `Rol: ${state.settings.role}`;
+  $("#user-role").textContent = state.settings.role;
 }
 
 function renderSources() {
@@ -52,7 +72,7 @@ function renderSources() {
     const badge = document.createElement("span"); badge.className = "kind-badge"; badge.textContent = source.kind.toUpperCase();
     const info = document.createElement("div"); const title = document.createElement("strong"); title.textContent = source.title;
     const meta = document.createElement("small"); meta.textContent = `${source.status === "ready" ? "Lista" : "Guardada"} · ${formatSize(source.size_bytes)} · ${source.characters} caracteres`;
-    info.append(title, meta); const remove = document.createElement("button"); remove.type = "button"; remove.textContent = "Eliminar";
+    info.append(title, meta); const remove = document.createElement("button"); remove.type = "button"; remove.dataset.write = "true"; remove.textContent = "Eliminar";
     remove.addEventListener("click", async () => { if (!window.confirm(`¿Eliminar “${source.title}”?`)) return; try { await api(`/admin/api/tenants/${state.tenantId}/knowledge/${source.id}`, { method: "DELETE" }); await loadSources(); toast("Fuente eliminada"); } catch (error) { toast(error.message, true); } });
     item.append(badge, info, remove); list.append(item);
   });
@@ -82,6 +102,7 @@ $("#file-form").addEventListener("submit", async (event) => {
 $("#knowledge-file").addEventListener("change", (event) => { $("#file-label").textContent = event.target.files[0]?.name || "Selecciona o arrastra un archivo"; });
 $("#toggle-key").addEventListener("click", () => { fields.apiKey.type = fields.apiKey.type === "password" ? "text" : "password"; $("#toggle-key").textContent = fields.apiKey.type === "password" ? "Ver" : "Ocultar"; });
 fields.tenant.addEventListener("change", async () => { state.tenantId = fields.tenant.value; await loadTenant(); });
+$("#logout").addEventListener("click", async () => { try { await api("/auth/logout", { method: "POST" }); window.location.assign("/login"); } catch (error) { toast(error.message, true); } });
 
-async function initialize() { try { await loadTenants(); await loadTenant(); } catch (error) { toast(error.message, true); } }
+async function initialize() { try { await loadUser(); await loadTenants(); await loadTenant(); } catch (error) { toast(error.message, true); } }
 initialize();

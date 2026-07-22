@@ -23,6 +23,9 @@ class Settings:
     tenant_secret_key: str | None = None
     upload_dir: str = "/tmp/chatbot_uploads"
     max_upload_bytes: int = 10 * 1024 * 1024
+    bootstrap_admin_email: str = "admin@serviceflow.local"
+    bootstrap_admin_password: str = "ServiceFlow-local-2026!"
+    session_ttl_hours: int = 12
 
     @property
     def uses_postgres(self) -> bool:
@@ -34,8 +37,11 @@ class Settings:
 
 
 def load_settings() -> Settings:
+    app_env = os.getenv("APP_ENV", "development")
+    default_email = "admin@serviceflow.local" if app_env == "development" else ""
+    default_password = "ServiceFlow-local-2026!" if app_env == "development" else ""
     return Settings(
-        app_env=os.getenv("APP_ENV", "development"),
+        app_env=app_env,
         database_url=os.getenv("DATABASE_URL") or None,
         redis_url=os.getenv("REDIS_URL") or None,
         event_stream=os.getenv("EVENT_STREAM", "whatsapp_messages"),
@@ -51,4 +57,7 @@ def load_settings() -> Settings:
         tenant_secret_key=os.getenv("TENANT_SECRET_KEY") or None,
         upload_dir=os.getenv("UPLOAD_DIR", "/tmp/chatbot_uploads"),
         max_upload_bytes=int(os.getenv("MAX_UPLOAD_BYTES", str(10 * 1024 * 1024))),
+        bootstrap_admin_email=os.getenv("BOOTSTRAP_ADMIN_EMAIL", default_email),
+        bootstrap_admin_password=os.getenv("BOOTSTRAP_ADMIN_PASSWORD", default_password),
+        session_ttl_hours=int(os.getenv("SESSION_TTL_HOURS", "12")),
     )

@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ServiceFlow · Panel de empresa</title>
     <link rel="stylesheet" href="/assets/admin.css" />
+    <link rel="stylesheet" href="/assets/admin-auth.css" />
   </head>
   <body>
     <div class="admin-shell">
@@ -19,11 +20,12 @@
         </nav>
         <div class="sidebar-note">
           <span></span>
-          <div><strong>Entorno local</strong><small>Sin acceso público</small></div>
+          <div><strong>Sesión protegida</strong><small id="user-role">Acceso por empresa</small></div>
         </div>
       </aside>
 
       <main class="content">
+        <div id="readonly-banner" class="readonly-banner" hidden>Tu rol permite consultar la configuración, pero no modificarla.</div>
         <header class="topbar">
           <div>
             <p>Centro de configuración</p>
@@ -33,6 +35,7 @@
             <span>Empresa activa</span>
             <select id="tenant-select"></select>
           </label>
+          <div class="user-menu"><div><strong id="user-email">Cargando…</strong><small id="active-role"></small></div><button id="logout" type="button">Salir</button></div>
         </header>
 
         <section class="summary-grid" aria-label="Resumen">

@@ -10,7 +10,22 @@ La interfaz incluye mensajes sugeridos, estado de salud, modo de IA activo, inte
 
 ## Panel de empresa
 
-Abre `http://127.0.0.1:8000/admin` para administrar cada tenant desde un panel aislado. Permite configurar nombre de empresa, nombre del bot, tono, bienvenida, instrucciones permanentes, proveedor, modelo y una API key propia.
+Abre `http://127.0.0.1:8000/login` e inicia sesión con el usuario local inicial:
+
+```text
+Correo: admin@serviceflow.local
+Contraseña: ServiceFlow-local-2026!
+```
+
+Después entrarás en `/admin`, donde cada usuario solo ve las empresas asignadas a su cuenta. El panel permite configurar nombre de empresa, nombre del bot, tono, bienvenida, instrucciones permanentes, proveedor, modelo y una API key propia. Los roles `owner` y `admin` pueden editar; `viewer` tiene acceso de solo lectura.
+
+La autenticación usa contraseñas Argon2, sesiones opacas almacenadas como hash, cookies `HttpOnly`, vencimiento configurable y protección CSRF. Cambia las credenciales iniciales antes de cualquier despliegue:
+
+```bash
+export BOOTSTRAP_ADMIN_EMAIL='tu-correo@empresa.com'
+export BOOTSTRAP_ADMIN_PASSWORD='una-contraseña-larga-y-única'
+export SESSION_TTL_HOURS='12'
+```
 
 Las credenciales nunca se devuelven al navegador y se almacenan cifradas. Antes de guardar claves por tenant, genera una llave maestra y expórtala en la misma terminal desde la que levantas Docker:
 
@@ -28,7 +43,13 @@ La biblioteca de conocimiento admite:
 - imágenes PNG, JPG y WEBP de hasta 10 MB, acompañadas por una descripción que se incorpora al contexto;
 - descarga y eliminación aisladas por tenant.
 
-Los binarios se guardan en el volumen `chatbot_uploads` y sus metadatos en PostgreSQL. Las fuentes listas se incorporan dinámicamente al contexto del tenant. El panel y sus endpoints administrativos solo están habilitados en `APP_ENV=development` hasta incorporar autenticación y autorización de usuarios.
+Los binarios se guardan en el volumen `chatbot_uploads` y sus metadatos en PostgreSQL. Las fuentes listas se incorporan dinámicamente al contexto del tenant. En producción, las cookies se marcan como `Secure` y las credenciales de arranque son obligatorias.
+
+## Producción con Cloudflare
+
+Sí es posible desplegar el producto usando Cloudflare, pero `docker compose` no se publica directamente. La ruta Cloudflare-native propuesta utiliza un Worker como entrada, un Cloudflare Container para la API existente, PostgreSQL administrado externamente, R2 para archivos y Cloudflare Queues para sustituir Redis Streams. Python Workers soporta FastAPI, pero sigue en beta; para esta base con dependencias nativas se recomienda Container.
+
+La estrategia, limitaciones y fases de migración están documentadas en [`docs/cloudflare-production.md`](docs/cloudflare-production.md).
 
 ## Arquitectura
 
@@ -84,7 +105,7 @@ La API devuelve `202 Accepted` sin esperar a la IA ni al calendario. La document
 El endpoint `GET /health` indica qué adaptador está activo:
 
 ```json
-{"status":"ok","storage":"memory","broker":"memory","ai":"rules"}
+{"status":"ok","storage":"memory","broker":"memory","ai":"tenant-configurable"}
 ```
 
 ## Activar la IA real
@@ -129,7 +150,7 @@ docker compose up --build
 Cuando aparezcan la API y el worker como activos, abre `http://127.0.0.1:8000/docs`. En este modo `/health` devuelve:
 
 ```json
-{"status":"ok","storage":"postgresql","broker":"redis-streams","ai":"rules"}
+{"status":"ok","storage":"postgresql","broker":"redis-streams","ai":"tenant-configurable"}
 ```
 
 `GET /ready` comprueba realmente PostgreSQL y Redis y devuelve `503` si una dependencia no está disponible.
@@ -201,7 +222,7 @@ python -m unittest discover -s tests -v
 # o pytest, si instalaste las dependencias de desarrollo
 ```
 
-Cubren agendamiento, idempotencia, opt-out, selección de adaptadores, salida estructurada, prompts dinámicos, normalización de servicios, fallback, confianza, derivación humana, persistencia y restricciones multi-tenant.
+Cubren autenticación, roles, sesiones, CSRF, agendamiento, idempotencia, opt-out, selección de adaptadores, salida estructurada, prompts dinámicos, fallback, persistencia y restricciones multi-tenant.
 
 ## Próximas fases
 
