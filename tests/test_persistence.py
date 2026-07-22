@@ -66,6 +66,8 @@ def test_schema_has_all_tenant_aggregate_tables() -> None:
         "conversations",
         "messages",
         "appointments",
+        "tenant_ai_configurations",
+        "knowledge_sources",
     }
     for table_name in ("services", "customers", "conversations", "messages", "appointments"):
         assert "tenant_id" in Base.metadata.tables[table_name].columns
@@ -127,6 +129,6 @@ async def test_redis_configuration_separates_worker_and_uses_durable_adapters() 
 async def test_openai_configuration_enables_resilient_llm_mode_without_network_call() -> None:
     container = build_container(Settings(openai_api_key="test-key"))
     try:
-        assert container.ai_mode == "openai-with-fallback"
+        assert container.ai_mode == "tenant-configurable"
     finally:
         await container.close()

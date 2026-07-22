@@ -6,15 +6,25 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
-from app.domain.models import ConversationEntry, IncomingMessage, IntentResult, OutgoingMessage, Tenant
+from app.domain.models import (
+    AIConfiguration,
+    ConversationEntry,
+    IncomingMessage,
+    IntentResult,
+    KnowledgeSource,
+    OutgoingMessage,
+    Tenant,
+)
 from app.infrastructure.database import tenant_session
 from app.infrastructure.orm import (
     ConversationRow,
     ConversationStatus,
     CustomerRow,
     MessageRow,
+    KnowledgeSourceRow,
     ServiceRow,
     TenantRow,
+    TenantAIConfigurationRow,
 )
 
 
@@ -37,7 +47,36 @@ class SqlAlchemyTenantRepository:
                 for service in row.services
                 if service.active
             }
-            return Tenant(row.id, row.name, row.tone, services, dict(row.knowledge))
+            sources = list(
+                await session.scalars(
+                    select(KnowledgeSourceRow)
+                    .where(
+                        KnowledgeSourceRow.tenant_id == tenant_id,
+                        KnowledgeSourceRow.status == "ready",
+                        KnowledgeSourceRow.extracted_text != "",
+                    )
+                    .order_by(KnowledgeSourceRow.created_at.desc())
+                    .limit(20)
+                )
+            )
+            knowledge = dict(row.knowledge)
+            remaining = 12_000
+            for source in sources:
+                excerpt = source.extracted_text[:remaining]
+                if not excerpt:
+                    break
+                knowledge[source.title] = excerpt
+                remaining -= len(excerpt)
+            return Tenant(
+                row.id,
+                row.name,
+                row.tone,
+                services,
+                knowledge,
+                row.bot_name,
+                row.welcome_message,
+                row.system_instructions,
+            )
 
     async def list_active(self) -> list[Tenant]:
         async with self._session_factory() as session:
@@ -59,9 +98,104 @@ class SqlAlchemyTenantRepository:
                         if service.active
                     },
                     dict(row.knowledge),
+                    row.bot_name,
+                    row.welcome_message,
+                    row.system_instructions,
                 )
                 for row in rows
             ]
+
+    async def update_profile(self, tenant: Tenant) -> None:
+        async with self._session_factory() as session, session.begin():
+            row = await session.get(TenantRow, tenant.id)
+            if row is None:
+                raise LookupError(f"Tenant no encontrado: {tenant.id}")
+            row.name = tenant.name
+            row.tone = tenant.tone
+            row.bot_name = tenant.bot_name
+            row.welcome_message = tenant.welcome_message
+            row.system_instructions = tenant.system_instructions
+
+
+class SqlAlchemyAIConfigurationRepository:
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+        self._session_factory = session_factory
+
+    async def get(self, tenant_id: str) -> AIConfiguration | None:
+        async with tenant_session(self._session_factory, tenant_id) as session:
+            row = await session.get(TenantAIConfigurationRow, tenant_id)
+            if row is None:
+                return None
+            return AIConfiguration(
+                row.tenant_id, row.provider, row.model, row.encrypted_api_key, row.key_last_four
+            )
+
+    async def save(self, configuration: AIConfiguration) -> None:
+        async with tenant_session(self._session_factory, configuration.tenant_id) as session:
+            row = await session.get(TenantAIConfigurationRow, configuration.tenant_id)
+            if row is None:
+                row = TenantAIConfigurationRow(tenant_id=configuration.tenant_id)
+                session.add(row)
+            row.provider = configuration.provider
+            row.model = configuration.model
+            row.encrypted_api_key = configuration.encrypted_api_key
+            row.key_last_four = configuration.key_last_four
+
+
+class SqlAlchemyKnowledgeRepository:
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+        self._session_factory = session_factory
+
+    async def list(self, tenant_id: str) -> list[KnowledgeSource]:
+        async with tenant_session(self._session_factory, tenant_id) as session:
+            rows = list(
+                await session.scalars(
+                    select(KnowledgeSourceRow)
+                    .where(KnowledgeSourceRow.tenant_id == tenant_id)
+                    .order_by(KnowledgeSourceRow.created_at.desc())
+                )
+            )
+            return [_knowledge_from_row(row) for row in rows]
+
+    async def add(self, source: KnowledgeSource) -> None:
+        async with tenant_session(self._session_factory, source.tenant_id) as session:
+            session.add(
+                KnowledgeSourceRow(
+                    id=uuid.UUID(source.id), tenant_id=source.tenant_id, title=source.title,
+                    kind=source.kind, status=source.status, filename=source.filename,
+                    content_type=source.content_type, size_bytes=source.size_bytes,
+                    storage_key=source.storage_key, extracted_text=source.extracted_text,
+                )
+            )
+
+    async def get(self, tenant_id: str, source_id: str) -> KnowledgeSource | None:
+        try:
+            parsed_id = uuid.UUID(source_id)
+        except ValueError:
+            return None
+        async with tenant_session(self._session_factory, tenant_id) as session:
+            row = await session.get(KnowledgeSourceRow, parsed_id)
+            return _knowledge_from_row(row) if row and row.tenant_id == tenant_id else None
+
+    async def delete(self, tenant_id: str, source_id: str) -> KnowledgeSource | None:
+        try:
+            parsed_id = uuid.UUID(source_id)
+        except ValueError:
+            return None
+        async with tenant_session(self._session_factory, tenant_id) as session:
+            row = await session.get(KnowledgeSourceRow, parsed_id)
+            if row is None or row.tenant_id != tenant_id:
+                return None
+            source = _knowledge_from_row(row)
+            await session.delete(row)
+            return source
+
+
+def _knowledge_from_row(row: KnowledgeSourceRow) -> KnowledgeSource:
+    return KnowledgeSource(
+        str(row.id), row.tenant_id, row.title, row.kind, row.status, row.created_at,
+        row.filename, row.content_type, row.size_bytes, row.storage_key, row.extracted_text,
+    )
 
 
 class SqlAlchemyServiceRepository:

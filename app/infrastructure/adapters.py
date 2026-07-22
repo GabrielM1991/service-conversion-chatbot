@@ -6,6 +6,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 from app.domain.models import (
+    AIConfiguration,
     ConversationEntry,
     IncomingMessage,
     Intent,
@@ -13,6 +14,7 @@ from app.domain.models import (
     OutgoingMessage,
     Tenant,
     TimeSlot,
+    KnowledgeSource,
 )
 from app.domain.ports import IntentClassifier
 
@@ -28,6 +30,37 @@ class InMemoryTenantRepository:
 
     async def list_active(self) -> list[Tenant]:
         return list(self._tenants.values())
+
+    async def update_profile(self, tenant: Tenant) -> None:
+        self._tenants[tenant.id] = tenant
+
+
+class InMemoryAIConfigurationRepository:
+    def __init__(self) -> None:
+        self._items: dict[str, AIConfiguration] = {}
+
+    async def get(self, tenant_id: str) -> AIConfiguration | None:
+        return self._items.get(tenant_id)
+
+    async def save(self, configuration: AIConfiguration) -> None:
+        self._items[configuration.tenant_id] = configuration
+
+
+class InMemoryKnowledgeRepository:
+    def __init__(self) -> None:
+        self._items: dict[tuple[str, str], KnowledgeSource] = {}
+
+    async def list(self, tenant_id: str) -> list[KnowledgeSource]:
+        return [item for (owner, _), item in self._items.items() if owner == tenant_id]
+
+    async def add(self, source: KnowledgeSource) -> None:
+        self._items[(source.tenant_id, source.id)] = source
+
+    async def get(self, tenant_id: str, source_id: str) -> KnowledgeSource | None:
+        return self._items.get((tenant_id, source_id))
+
+    async def delete(self, tenant_id: str, source_id: str) -> KnowledgeSource | None:
+        return self._items.pop((tenant_id, source_id), None)
 
 
 class InMemoryDeduplicationStore:

@@ -94,5 +94,6 @@ class UnknownIntentStrategy(IntentStrategy):
         return OutgoingMessage(
             tenant.id,
             message.customer_phone,
-            f"Hola, soy el asistente de {tenant.name}. ¿Buscas información o quieres agendar?",
+            f"Hola, soy {tenant.bot_name}, asistente de {tenant.name}. "
+            "¿Buscas información o quieres agendar?",
         )
