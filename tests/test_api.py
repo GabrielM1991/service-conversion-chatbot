@@ -19,6 +19,14 @@ def test_webhook_acknowledges_valid_message_without_waiting_for_worker() -> None
         assert response.json() == {"status": "accepted", "message_id": "wamid-api-1"}
 
 
+def test_health_reports_active_storage_adapter() -> None:
+    with TestClient(app) as client:
+        response = client.get("/health")
+
+        assert response.status_code == 200
+        assert response.json() == {"status": "ok", "storage": "memory"}
+
+
 def test_webhook_rejects_missing_tenant_header() -> None:
     with TestClient(app) as client:
         response = client.post(

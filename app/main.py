@@ -26,11 +26,12 @@ async def lifespan(app: FastAPI):
     finally:
         worker.cancel()
         await asyncio.gather(worker, return_exceptions=True)
+        await container.close()
 
 
 app = FastAPI(
     title="Service Conversion Chatbot",
-    version="0.1.0",
+    version="0.2.0",
     description="Webhook multi-tenant con procesamiento asíncrono y arquitectura hexagonal.",
     lifespan=lifespan,
 )
@@ -43,8 +44,8 @@ class WhatsAppWebhook(BaseModel):
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
+async def health(request: Request) -> dict[str, str]:
+    return {"status": "ok", "storage": request.app.state.container.storage_mode}
 
 
 @app.post("/webhooks/whatsapp", status_code=status.HTTP_202_ACCEPTED)

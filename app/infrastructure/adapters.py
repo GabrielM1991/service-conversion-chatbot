@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta
 
-from app.domain.models import Intent, IntentResult, OutgoingMessage, Tenant, TimeSlot
+from app.domain.models import IncomingMessage, Intent, IntentResult, OutgoingMessage, Tenant, TimeSlot
 
 logger = logging.getLogger("chatbot")
 
@@ -92,3 +92,12 @@ class ConsoleChatGateway:
             extra={"component": "WhatsAppAPI", "tenant": message.tenant_id},
         )
 
+
+class NoOpConversationRepository:
+    async def record_incoming(self, message: IncomingMessage) -> None:
+        return None
+
+    async def record_outgoing(
+        self, incoming: IncomingMessage, outgoing: OutgoingMessage, intent: IntentResult
+    ) -> None:
+        return None

@@ -38,6 +38,13 @@ class ChatGateway(Protocol):
     async def send(self, message: OutgoingMessage) -> None: ...
 
 
+class ConversationRepository(Protocol):
+    async def record_incoming(self, message: IncomingMessage) -> None: ...
+
+    async def record_outgoing(
+        self, incoming: IncomingMessage, outgoing: OutgoingMessage, intent: IntentResult
+    ) -> None: ...
+
+
 class EventPublisher(Protocol):
     async def publish(self, event: IncomingMessage) -> None: ...
-
