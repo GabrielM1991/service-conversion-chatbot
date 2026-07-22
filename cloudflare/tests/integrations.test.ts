@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { validateIntegrationInput } from "../src/integrations";
+import { AI_MODEL_OPTIONS, validateIntegrationInput } from "../src/integrations";
 
 describe("tenant integration validation", () => {
   it("accepts supported providers and Meta identifiers", () => {
@@ -23,5 +23,14 @@ describe("tenant integration validation", () => {
     expect(() =>
       validateIntegrationInput({ aiProvider: "workers-ai", aiModel: "model", metaGraphVersion: "latest" }),
     ).toThrow("Graph API");
+  });
+
+  it("offers supported model choices for every provider including Gemini", () => {
+    expect(AI_MODEL_OPTIONS.openai.map((model) => model.value)).toContain("gpt-5.6-terra");
+    expect(AI_MODEL_OPTIONS.anthropic.map((model) => model.value)).toContain("claude-sonnet-5");
+    expect(AI_MODEL_OPTIONS.google.map((model) => model.value)).toContain("gemini-3.6-flash");
+    expect(
+      validateIntegrationInput({ aiProvider: "google", aiModel: "gemini-3.6-flash" }),
+    ).toMatchObject({ aiProvider: "google" });
   });
 });

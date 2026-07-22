@@ -15,7 +15,7 @@ Cloudflare Worker
        `---- Workers AI -> Vectorize (referencias con filtro tenantId)
 ```
 
-La base recibe webhooks firmados, publica mensajes sin bloquear la petición, deduplica dentro del espacio privado del tenant y permite guardar/buscar texto de conocimiento. También incorpora panel responsive, propietarios, sesiones, roles, configuración del bot e integraciones cifradas de Meta/WhatsApp, Workers AI, OpenAI y Anthropic. PDF/imágenes, el uso conversacional efectivo del proveedor elegido y la respuesta saliente permanecen todavía en FastAPI.
+La base recibe webhooks firmados, publica mensajes sin bloquear la petición, deduplica dentro del espacio privado del tenant y permite guardar/buscar texto de conocimiento. También incorpora panel responsive, propietarios, sesiones, roles, configuración del bot e integraciones cifradas de Meta/WhatsApp, Workers AI, OpenAI, Anthropic y Google Gemini. PDF/imágenes, el uso conversacional efectivo del proveedor elegido y la respuesta saliente permanecen todavía en FastAPI.
 
 ## Ruta híbrida con el backend existente
 

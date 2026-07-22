@@ -49,7 +49,7 @@ Los binarios se guardan en el volumen `chatbot_uploads` y sus metadatos en Postg
 
 Sí: ya existe una base Cloudflare-native paralela en [`cloudflare/`](cloudflare/README.md). Usa Workers, D1, Durable Objects SQLite, Queues, Vectorize y Workers AI, sin depender de Docker, PostgreSQL, Redis ni R2 para esos flujos. Incluye recepción firmada de WhatsApp, cola asíncrona, aislamiento por tenant e ingesta/búsqueda semántica de texto.
 
-La base Cloudflare ya incluye panel responsive, autenticación mediante claves de acceso de alta entropía, sesiones, configuración por tenant e integraciones cifradas para Meta/WhatsApp, Workers AI, OpenAI y Anthropic. La aplicación FastAPI sigue conservando las funciones aún no migradas: PDF/imágenes y la ejecución completa del agente con el proveedor seleccionado. La estrategia y limitaciones están documentadas en [`docs/cloudflare-production.md`](docs/cloudflare-production.md).
+La base Cloudflare ya incluye panel responsive, autenticación mediante claves de acceso de alta entropía, sesiones, configuración por tenant e integraciones cifradas para Meta/WhatsApp, Workers AI, OpenAI, Anthropic y Google Gemini. La aplicación FastAPI sigue conservando las funciones aún no migradas: PDF/imágenes y la ejecución completa del agente con el proveedor seleccionado. La estrategia y limitaciones están documentadas en [`docs/cloudflare-production.md`](docs/cloudflare-production.md).
 
 ## Arquitectura
 
