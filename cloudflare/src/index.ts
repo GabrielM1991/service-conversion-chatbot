@@ -1,3 +1,14 @@
+import {
+  authenticate,
+  clearSessionCookie,
+  createOwnerAccess,
+  login,
+  logout,
+  membershipForTenant,
+  membershipsForUser,
+  validCsrf,
+  validEmail,
+} from "./auth";
 import { extractWhatsappMessages } from "./events";
 import {
   ingestTextKnowledge,
@@ -6,14 +17,29 @@ import {
 } from "./knowledge";
 import { isAdminRequest, isValidIdentifier, verifyMetaSignature } from "./security";
 import { TenantWorkspace } from "./tenant-workspace";
+import { dashboardHtml, loginHtml, setupHtml } from "./ui";
 import type { Env, WhatsappMessageReceived } from "./types";
 
 export { TenantWorkspace };
 
-function json(payload: unknown, status = 200): Response {
+function json(payload: unknown, status = 200, headers: HeadersInit = {}): Response {
   return Response.json(payload, {
     status,
-    headers: { "Cache-Control": "no-store" },
+    headers: { "Cache-Control": "no-store", ...headers },
+  });
+}
+
+function html(content: (nonce: string) => string): Response {
+  const nonce = crypto.randomUUID();
+  return new Response(content(nonce), {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+      "Content-Security-Policy": `default-src 'self'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'; img-src 'self' data:; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`,
+      "Referrer-Policy": "no-referrer",
+      "X-Content-Type-Options": "nosniff",
+      "X-Frame-Options": "DENY",
+    },
   });
 }
 
@@ -41,6 +67,83 @@ async function requireAdmin(request: Request, env: Env): Promise<Response | null
   return isAdminRequest(request, env.ADMIN_API_TOKEN)
     ? null
     : json({ detail: "No autorizado" }, 401);
+}
+
+function sameOrigin(request: Request): boolean {
+  const origin = request.headers.get("Origin");
+  return !origin || origin === new URL(request.url).origin;
+}
+
+async function authorizeTenant(
+  request: Request,
+  env: Env,
+  tenantId: string,
+  mutation = false,
+): Promise<{ userId: string | null; role: "superadmin" | "owner" | "admin" | "viewer" } | Response> {
+  if (isAdminRequest(request, env.ADMIN_API_TOKEN)) return { userId: null, role: "superadmin" };
+  const user = await authenticate(request, env);
+  if (!user) return json({ detail: "No autorizado" }, 401);
+  const membership = await membershipForTenant(env, user.id, tenantId);
+  if (!membership) return json({ detail: "Empresa no encontrada" }, 404);
+  if (mutation && !validCsrf(request, user)) return json({ detail: "Solicitud inválida" }, 403);
+  if (mutation && membership.role === "viewer") {
+    return json({ detail: "Tu rol es de solo lectura" }, 403);
+  }
+  return { userId: user.id, role: membership.role };
+}
+
+async function setupOwner(request: Request, env: Env): Promise<Response> {
+  if (!sameOrigin(request)) return json({ detail: "Origen no permitido" }, 403);
+  const denied = await requireAdmin(request, env);
+  if (denied) return denied;
+  const payload = (await request.json()) as Record<string, unknown>;
+  const tenantId = typeof payload.tenantId === "string" ? payload.tenantId.trim() : "";
+  const tenantName = typeof payload.tenantName === "string" ? payload.tenantName.trim() : "";
+  const email = typeof payload.email === "string" ? payload.email.trim().toLowerCase() : "";
+  if (
+    !isValidIdentifier(tenantId) ||
+    tenantName.length < 2 ||
+    tenantName.length > 160 ||
+    !validEmail(email)
+  ) {
+    return json({ detail: "Datos de empresa o correo inválidos" }, 400);
+  }
+  try {
+    const account = await createOwnerAccess(env, { tenantId, tenantName, email });
+    await tenantWorkspace(env, tenantId).summary();
+    return json({ tenantId, email, accessKey: account.accessKey }, 201);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "No fue posible crear la cuenta";
+    return json({ detail }, 409);
+  }
+}
+
+async function loginRequest(request: Request, env: Env): Promise<Response> {
+  if (!sameOrigin(request)) return json({ detail: "Origen no permitido" }, 403);
+  const payload = (await request.json()) as Record<string, unknown>;
+  const email = typeof payload.email === "string" ? payload.email : "";
+  const accessKey = typeof payload.accessKey === "string" ? payload.accessKey : "";
+  const result = await login(env, email, accessKey);
+  if (!result) return json({ detail: "Correo o clave de acceso incorrectos" }, 401);
+  return json(
+    { user: result.user, memberships: result.memberships },
+    200,
+    { "Set-Cookie": result.cookie },
+  );
+}
+
+async function sessionRequest(request: Request, env: Env): Promise<Response> {
+  const user = await authenticate(request, env);
+  if (!user) return json({ detail: "No autorizado" }, 401);
+  return json({ user, memberships: await membershipsForUser(env, user.id) });
+}
+
+async function logoutRequest(request: Request, env: Env): Promise<Response> {
+  const user = await authenticate(request, env);
+  if (!user) return json({ status: "ok" }, 200, { "Set-Cookie": clearSessionCookie() });
+  if (!validCsrf(request, user)) return json({ detail: "Solicitud inválida" }, 403);
+  await logout(request, env);
+  return json({ status: "ok" }, 200, { "Set-Cookie": clearSessionCookie() });
 }
 
 async function createTenant(request: Request, env: Env): Promise<Response> {
@@ -116,8 +219,8 @@ async function addKnowledge(
   env: Env,
   tenantId: string,
 ): Promise<Response> {
-  const denied = await requireAdmin(request, env);
-  if (denied) return denied;
+  const access = await authorizeTenant(request, env, tenantId, true);
+  if (access instanceof Response) return access;
   if (!(await activeTenant(env, tenantId))) return json({ detail: "Empresa no encontrada" }, 404);
   let input;
   try {
@@ -142,8 +245,8 @@ async function queryKnowledge(
   env: Env,
   tenantId: string,
 ): Promise<Response> {
-  const denied = await requireAdmin(request, env);
-  if (denied) return denied;
+  const access = await authorizeTenant(request, env, tenantId, true);
+  if (access instanceof Response) return access;
   if (!(await activeTenant(env, tenantId))) return json({ detail: "Empresa no encontrada" }, 404);
   const payload = (await request.json()) as Record<string, unknown>;
   const query = typeof payload.query === "string" ? payload.query.trim() : "";
@@ -162,16 +265,126 @@ async function queryKnowledge(
 }
 
 async function tenantSummary(request: Request, env: Env, tenantId: string): Promise<Response> {
-  const denied = await requireAdmin(request, env);
-  if (denied) return denied;
+  const access = await authorizeTenant(request, env, tenantId);
+  if (access instanceof Response) return access;
   if (!(await activeTenant(env, tenantId))) return json({ detail: "Empresa no encontrada" }, 404);
   return json({ tenantId, ...(await tenantWorkspace(env, tenantId).summary()) });
+}
+
+async function tenantSettings(request: Request, env: Env, tenantId: string): Promise<Response> {
+  const mutation = request.method === "PUT";
+  const access = await authorizeTenant(request, env, tenantId, mutation);
+  if (access instanceof Response) return access;
+  if (!(await activeTenant(env, tenantId))) return json({ detail: "Empresa no encontrada" }, 404);
+  if (!mutation) {
+    const settings = await env.GLOBAL_DB.prepare(
+      `SELECT bot_name AS botName, tone, welcome_message AS welcomeMessage,
+              system_instructions AS systemInstructions, ai_provider AS aiProvider,
+              ai_model AS aiModel, updated_at AS updatedAt
+       FROM tenant_settings WHERE tenant_id = ?`,
+    )
+      .bind(tenantId)
+      .first();
+    return json(
+      settings ?? {
+        botName: "Asistente",
+        tone: "Profesional y cercano",
+        welcomeMessage: "Hola, ¿cómo puedo ayudarte?",
+        systemInstructions: "",
+        aiProvider: "workers-ai",
+        aiModel: env.EMBEDDING_MODEL,
+      },
+    );
+  }
+  const payload = (await request.json()) as Record<string, unknown>;
+  const botName = typeof payload.botName === "string" ? payload.botName.trim() : "";
+  const tone = typeof payload.tone === "string" ? payload.tone.trim() : "";
+  const welcome = typeof payload.welcomeMessage === "string" ? payload.welcomeMessage.trim() : "";
+  const instructions =
+    typeof payload.systemInstructions === "string" ? payload.systemInstructions.trim() : "";
+  if (
+    botName.length < 2 ||
+    botName.length > 80 ||
+    tone.length < 2 ||
+    tone.length > 120 ||
+    welcome.length < 2 ||
+    welcome.length > 1_000 ||
+    instructions.length > 10_000
+  ) {
+    return json({ detail: "La configuración contiene campos inválidos" }, 400);
+  }
+  await env.GLOBAL_DB.prepare(
+    `INSERT INTO tenant_settings
+      (tenant_id, bot_name, tone, welcome_message, system_instructions, ai_provider, ai_model, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'workers-ai', ?, datetime('now'))
+     ON CONFLICT(tenant_id) DO UPDATE SET
+       bot_name = excluded.bot_name,
+       tone = excluded.tone,
+       welcome_message = excluded.welcome_message,
+       system_instructions = excluded.system_instructions,
+       ai_provider = excluded.ai_provider,
+       ai_model = excluded.ai_model,
+       updated_at = excluded.updated_at`,
+  )
+    .bind(tenantId, botName, tone, welcome, instructions, env.EMBEDDING_MODEL)
+    .run();
+  await env.GLOBAL_DB.prepare(
+    "INSERT INTO audit_events (id, tenant_id, user_id, action, metadata) VALUES (?, ?, ?, ?, ?)",
+  )
+    .bind(crypto.randomUUID(), tenantId, access.userId, "settings.updated", "{}")
+    .run();
+  return tenantSettings(new Request(request.url, { method: "GET", headers: request.headers }), env, tenantId);
+}
+
+async function listKnowledge(request: Request, env: Env, tenantId: string): Promise<Response> {
+  const access = await authorizeTenant(request, env, tenantId);
+  if (access instanceof Response) return access;
+  if (!(await activeTenant(env, tenantId))) return json({ detail: "Empresa no encontrada" }, 404);
+  return json({ sources: await tenantWorkspace(env, tenantId).listKnowledge() });
+}
+
+async function removeKnowledge(
+  request: Request,
+  env: Env,
+  tenantId: string,
+  sourceId: string,
+): Promise<Response> {
+  const access = await authorizeTenant(request, env, tenantId, true);
+  if (access instanceof Response) return access;
+  const vectorIds = await tenantWorkspace(env, tenantId).deleteKnowledge(sourceId);
+  if (!vectorIds.length) return json({ detail: "Fuente no encontrada" }, 404);
+  await env.KNOWLEDGE_INDEX.deleteByIds(vectorIds);
+  await env.GLOBAL_DB.prepare(
+    "INSERT INTO audit_events (id, tenant_id, user_id, action, metadata) VALUES (?, ?, ?, ?, ?)",
+  )
+    .bind(
+      crypto.randomUUID(),
+      tenantId,
+      access.userId,
+      "knowledge.deleted",
+      JSON.stringify({ sourceId }),
+    )
+    .run();
+  return json({ status: "deleted", id: sourceId });
 }
 
 async function handleFetch(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   if (request.method === "GET" && url.pathname === "/") {
-    return json({ service: "ServiceFlow Cloudflare", version: "0.1.0" });
+    return Response.redirect(`${url.origin}/admin`, 302);
+  }
+  if (request.method === "GET" && url.pathname === "/login") {
+    return (await authenticate(request, env))
+      ? Response.redirect(`${url.origin}/admin`, 302)
+      : html(loginHtml);
+  }
+  if (request.method === "GET" && url.pathname === "/setup") {
+    return html(setupHtml);
+  }
+  if (request.method === "GET" && url.pathname === "/admin") {
+    return (await authenticate(request, env))
+      ? html(dashboardHtml)
+      : Response.redirect(`${url.origin}/login`, 302);
   }
   if (request.method === "GET" && url.pathname === "/health") {
     await env.GLOBAL_DB.prepare("SELECT 1 AS ok").first();
@@ -179,6 +392,18 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
   }
   if (request.method === "POST" && url.pathname === "/internal/tenants") {
     return createTenant(request, env);
+  }
+  if (request.method === "POST" && url.pathname === "/api/setup") {
+    return setupOwner(request, env);
+  }
+  if (request.method === "POST" && url.pathname === "/api/auth/login") {
+    return loginRequest(request, env);
+  }
+  if (request.method === "POST" && url.pathname === "/api/auth/logout") {
+    return logoutRequest(request, env);
+  }
+  if (request.method === "GET" && url.pathname === "/api/session") {
+    return sessionRequest(request, env);
   }
 
   const webhook = url.pathname.match(/^\/webhooks\/whatsapp\/([A-Za-z0-9_-]{2,80})$/);
@@ -195,6 +420,18 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
   if (knowledge?.[1] && request.method === "POST") {
     return addKnowledge(request, env, knowledge[1]);
   }
+  const knowledgeList = url.pathname.match(
+    /^\/api\/tenants\/([A-Za-z0-9_-]{2,80})\/knowledge$/,
+  );
+  if (knowledgeList?.[1] && request.method === "GET") {
+    return listKnowledge(request, env, knowledgeList[1]);
+  }
+  const knowledgeItem = url.pathname.match(
+    /^\/api\/tenants\/([A-Za-z0-9_-]{2,80})\/knowledge\/([A-Fa-f0-9-]{36})$/,
+  );
+  if (knowledgeItem?.[1] && knowledgeItem[2] && request.method === "DELETE") {
+    return removeKnowledge(request, env, knowledgeItem[1], knowledgeItem[2]);
+  }
   const search = url.pathname.match(
     /^\/api\/tenants\/([A-Za-z0-9_-]{2,80})\/knowledge\/search$/,
   );
@@ -204,6 +441,10 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
   const summary = url.pathname.match(/^\/api\/tenants\/([A-Za-z0-9_-]{2,80})\/summary$/);
   if (summary?.[1] && request.method === "GET") {
     return tenantSummary(request, env, summary[1]);
+  }
+  const settings = url.pathname.match(/^\/api\/tenants\/([A-Za-z0-9_-]{2,80})\/settings$/);
+  if (settings?.[1] && (request.method === "GET" || request.method === "PUT")) {
+    return tenantSettings(request, env, settings[1]);
   }
   return json({ detail: "Ruta no encontrada" }, 404);
 }
@@ -246,6 +487,8 @@ export default {
     await handleQueue(batch, env);
   },
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
-    await env.GLOBAL_DB.prepare("DELETE FROM auth_sessions WHERE expires_at <= datetime('now')").run();
+    await env.GLOBAL_DB.prepare(
+      "DELETE FROM auth_sessions WHERE datetime(expires_at) <= datetime('now')",
+    ).run();
   },
 } satisfies ExportedHandler<Env, WhatsappMessageReceived>;

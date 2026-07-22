@@ -158,6 +158,48 @@ export class TenantWorkspace extends DurableObject<Env> {
     );
   }
 
+  async listKnowledge(): Promise<
+    Array<{
+      id: string;
+      title: string;
+      contentType: string;
+      characters: number;
+      chunks: number;
+      createdAt: string;
+    }>
+  > {
+    return this.sql
+      .exec(
+        `SELECT id, title, content_type AS contentType, characters, chunks,
+                created_at AS createdAt
+         FROM knowledge_sources
+         ORDER BY created_at DESC
+         LIMIT 100`,
+      )
+      .toArray()
+      .map((row) => ({
+        id: String(row.id),
+        title: String(row.title),
+        contentType: String(row.contentType),
+        characters: Number(row.characters),
+        chunks: Number(row.chunks),
+        createdAt: String(row.createdAt),
+      }));
+  }
+
+  async deleteKnowledge(sourceId: string): Promise<string[]> {
+    const source = this.sql
+      .exec("SELECT chunks FROM knowledge_sources WHERE id = ?", sourceId)
+      .toArray()[0];
+    if (!source) return [];
+    const vectorIds = Array.from(
+      { length: Number(source.chunks) },
+      (_, index) => `${sourceId}-${index}`,
+    );
+    this.sql.exec("DELETE FROM knowledge_sources WHERE id = ?", sourceId);
+    return vectorIds;
+  }
+
   async summary(): Promise<Record<string, number>> {
     const message = this.sql.exec("SELECT COUNT(*) AS count FROM messages").toArray()[0];
     const knowledge = this.sql

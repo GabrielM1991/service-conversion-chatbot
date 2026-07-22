@@ -14,7 +14,7 @@
     {
       "binding": "GLOBAL_DB",
       "database_name": "serviceflow-global",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "a4925d39-90ac-4c0b-a199-daf10f816b5c",
       "migrations_dir": "migrations"
     }
   ],
