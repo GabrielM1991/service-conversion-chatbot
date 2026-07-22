@@ -2,6 +2,12 @@
 
 Chatbot SaaS multi-tenant para empresas de servicios. El webhook deduplica y publica cada mensaje en Redis Streams; un worker independiente ejecuta el pipeline, clasifica la intención con salida estructurada, selecciona una estrategia y persiste la conversación sin mezclar datos entre negocios.
 
+## Interfaz de demostración
+
+Con la aplicación levantada, abre `http://127.0.0.1:8000/` para usar una interfaz responsive estilo mensajería. Permite cambiar de tenant, usar distintos teléfonos de prueba, enviar mensajes al webhook real y visualizar la respuesta que el worker guardó en PostgreSQL.
+
+La interfaz incluye mensajes sugeridos, estado de salud, modo de IA activo, intención detectada y nivel de confianza. Los endpoints de apoyo `/demo/tenants` y `/demo/messages` solo están disponibles cuando `APP_ENV=development`; no se exponen en producción.
+
 ## Arquitectura
 
 ```text

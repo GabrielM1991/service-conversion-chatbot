@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
-from app.domain.models import IncomingMessage, IntentResult, OutgoingMessage, Tenant
+from app.domain.models import ConversationEntry, IncomingMessage, IntentResult, OutgoingMessage, Tenant
 from app.infrastructure.database import tenant_session
 from app.infrastructure.orm import (
     ConversationRow,
@@ -38,6 +38,30 @@ class SqlAlchemyTenantRepository:
                 if service.active
             }
             return Tenant(row.id, row.name, row.tone, services, dict(row.knowledge))
+
+    async def list_active(self) -> list[Tenant]:
+        async with self._session_factory() as session:
+            statement = (
+                select(TenantRow)
+                .where(TenantRow.active.is_(True))
+                .options(selectinload(TenantRow.services))
+                .order_by(TenantRow.name)
+            )
+            rows = list((await session.scalars(statement)).all())
+            return [
+                Tenant(
+                    row.id,
+                    row.name,
+                    row.tone,
+                    {
+                        service.name: service.duration_minutes
+                        for service in row.services
+                        if service.active
+                    },
+                    dict(row.knowledge),
+                )
+                for row in rows
+            ]
 
 
 class SqlAlchemyServiceRepository:
@@ -110,6 +134,48 @@ class SqlAlchemyConversationRepository:
                     fallback_used=intent.fallback_used,
                 )
             )
+
+    async def list_recent(
+        self, tenant_id: str, phone: str, limit: int = 50
+    ) -> list[ConversationEntry]:
+        async with tenant_session(self._session_factory, tenant_id) as session:
+            statement = (
+                select(MessageRow)
+                .join(
+                    ConversationRow,
+                    and_(
+                        ConversationRow.tenant_id == MessageRow.tenant_id,
+                        ConversationRow.id == MessageRow.conversation_id,
+                    ),
+                )
+                .join(
+                    CustomerRow,
+                    and_(
+                        CustomerRow.tenant_id == ConversationRow.tenant_id,
+                        CustomerRow.id == ConversationRow.customer_id,
+                    ),
+                )
+                .where(
+                    MessageRow.tenant_id == tenant_id,
+                    CustomerRow.phone == phone,
+                )
+                .order_by(MessageRow.created_at.desc())
+                .limit(limit)
+            )
+            rows = list((await session.scalars(statement)).all())
+            return [
+                ConversationEntry(
+                    id=row.provider_message_id,
+                    direction=row.direction,
+                    text=row.body,
+                    created_at=row.created_at,
+                    intent=row.intent,
+                    confidence=row.intent_confidence,
+                    ai_source=row.ai_source,
+                    requires_human=bool(row.requires_human),
+                )
+                for row in reversed(rows)
+            ]
 
     async def _get_or_create_conversation(
         self, session: AsyncSession, tenant_id: str, phone: str

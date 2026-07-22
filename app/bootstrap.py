@@ -25,10 +25,10 @@ from app.infrastructure.adapters import (
     FakeCalendarGateway,
     FakePaymentGateway,
     InMemoryDeduplicationStore,
+    InMemoryConversationRepository,
     InMemoryOptOutStore,
     InMemoryTenantRepository,
     KeywordIntentClassifier,
-    NoOpConversationRepository,
     ResilientIntentClassifier,
 )
 from app.infrastructure.database import create_database_engine, create_session_factory
@@ -52,6 +52,7 @@ class Container:
     storage_mode: str
     broker_mode: str
     ai_mode: str
+    app_env: str
     embedded_worker: bool
     database_engine: AsyncEngine | None = None
     redis_client: Redis | None = None
@@ -97,7 +98,7 @@ def build_container(
                 ),
             ]
         )
-        conversations = NoOpConversationRepository()
+        conversations = InMemoryConversationRepository()
         storage_mode = "memory"
     if conversations_override is not None:
         conversations = conversations_override
@@ -175,6 +176,7 @@ def build_container(
         storage_mode,
         broker_mode,
         ai_mode,
+        runtime_settings.app_env,
         embedded_worker,
         engine,
         redis_client,
