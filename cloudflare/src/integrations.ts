@@ -1,7 +1,32 @@
 import { decryptSecret, encryptSecret, maskedSecret } from "./crypto";
 import type { Env } from "./types";
 
-export type AiProvider = "workers-ai" | "openai" | "anthropic";
+export type AiProvider = "workers-ai" | "openai" | "anthropic" | "google";
+
+export const AI_MODEL_OPTIONS: Record<AiProvider, Array<{ value: string; label: string }>> = {
+  "workers-ai": [
+    { value: "@cf/zai-org/glm-4.7-flash", label: "GLM 4.7 Flash · rápido y multilingüe" },
+    { value: "@cf/google/gemma-4-26b-a4b-it", label: "Gemma 4 26B · equilibrio general" },
+    { value: "@cf/openai/gpt-oss-120b", label: "GPT-OSS 120B · razonamiento avanzado" },
+    { value: "@cf/moonshotai/kimi-k2.6", label: "Kimi K2.6 · contexto amplio y herramientas" },
+  ],
+  openai: [
+    { value: "gpt-5.6-terra", label: "GPT-5.6 Terra · recomendado para servicios" },
+    { value: "gpt-5.6-luna", label: "GPT-5.6 Luna · rápido y económico" },
+    { value: "gpt-5.6-sol", label: "GPT-5.6 Sol · máxima capacidad" },
+  ],
+  anthropic: [
+    { value: "claude-sonnet-5", label: "Claude Sonnet 5 · velocidad e inteligencia" },
+    { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5 · rápido y económico" },
+    { value: "claude-opus-4-8", label: "Claude Opus 4.8 · trabajo complejo" },
+    { value: "claude-fable-5", label: "Claude Fable 5 · máxima capacidad" },
+  ],
+  google: [
+    { value: "gemini-3.6-flash", label: "Gemini 3.6 Flash · recomendado y multimodal" },
+    { value: "gemini-3.5-flash-lite", label: "Gemini 3.5 Flash-Lite · alto volumen" },
+    { value: "gemini-3.1-pro", label: "Gemini 3.1 Pro · razonamiento avanzado" },
+  ],
+};
 
 interface IntegrationRow {
   tenantId: string;
@@ -76,7 +101,7 @@ export function validateIntegrationInput(payload: unknown): IntegrationInput {
     throw new Error("WhatsApp Business Account ID inválido");
   }
   if (!/^v[0-9]{1,3}\.0$/.test(result.metaGraphVersion)) throw new Error("Versión de Graph API inválida");
-  if (!["workers-ai", "openai", "anthropic"].includes(result.aiProvider)) {
+  if (!["workers-ai", "openai", "anthropic", "google"].includes(result.aiProvider)) {
     throw new Error("Proveedor de IA inválido");
   }
   if (result.aiModel.length < 2) throw new Error("Modelo de IA inválido");
@@ -112,6 +137,7 @@ export async function publicIntegrations(env: Env, tenantId: string, origin: str
       aiApiKeyMasked: "",
       aiStatus: "pending",
       aiCheckedAt: null,
+      modelOptions: AI_MODEL_OPTIONS,
     };
   }
   const [accessToken, appSecret, verifyToken, aiApiKey] = await Promise.all([
@@ -136,6 +162,7 @@ export async function publicIntegrations(env: Env, tenantId: string, origin: str
     aiApiKeyMasked: maskedSecret(aiApiKey),
     aiStatus: current.aiStatus,
     aiCheckedAt: current.aiCheckedAt,
+    modelOptions: AI_MODEL_OPTIONS,
     updatedAt: current.updatedAt,
   };
 }
@@ -227,12 +254,17 @@ export async function testIntegration(env: Env, tenantId: string, target: "whats
       if (!apiKey) throw new Error("Falta la API Key del proveedor");
       const endpoint = current.aiProvider === "openai"
         ? `https://api.openai.com/v1/models/${encodeURIComponent(current.aiModel)}`
-        : `https://api.anthropic.com/v1/models/${encodeURIComponent(current.aiModel)}`;
+        : current.aiProvider === "anthropic"
+          ? `https://api.anthropic.com/v1/models/${encodeURIComponent(current.aiModel)}`
+          : `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(current.aiModel)}`;
       const headers: Record<string, string> = current.aiProvider === "openai"
         ? { Authorization: `Bearer ${apiKey}` }
-        : { "x-api-key": apiKey, "anthropic-version": "2023-06-01" };
+        : current.aiProvider === "anthropic"
+          ? { "x-api-key": apiKey, "anthropic-version": "2023-06-01" }
+          : { "x-goog-api-key": apiKey };
       const response = await fetch(endpoint, { headers });
-      if (!response.ok) throw new Error(`${current.aiProvider === "openai" ? "OpenAI" : "Anthropic"} rechazó la clave o el modelo`);
+      const providerName = current.aiProvider === "openai" ? "OpenAI" : current.aiProvider === "anthropic" ? "Anthropic" : "Google Gemini";
+      if (!response.ok) throw new Error(`${providerName} rechazó la clave o el modelo`);
     }
     await markStatus(env, tenantId, target, "connected");
     return { status: "connected", provider: current.aiProvider, model: current.aiModel };

@@ -17,6 +17,8 @@ describe("tenant dashboard HTML", () => {
     expect(html).toContain("Integraciones");
     expect(html).toContain("Meta · WhatsApp");
     expect(html).toContain("Cloudflare Workers AI");
+    expect(html).toContain("Google Gemini");
+    expect(html).toContain("Modelo personalizado");
     expect(html).not.toContain("ADMIN_API_TOKEN");
   });
 });

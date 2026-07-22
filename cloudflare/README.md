@@ -15,7 +15,7 @@ Esta carpeta contiene la primera base **Cloudflare-native** del producto. Conviv
 - Integraciones por tenant para Meta/WhatsApp y modelos de IA, con credenciales cifradas.
 - Pruebas unitarias y verificación automática en GitHub Actions.
 
-Esta base todavía no reemplaza toda la aplicación Python. La extracción de PDF/imágenes, el agente conversacional y el envío de respuestas a WhatsApp se migrarán en las siguientes fases. El panel ya permite configurar y comprobar Workers AI, OpenAI y Anthropic. No requiere una suscripción de R2: en esta etapa conserva texto y descripciones en SQLite; los binarios grandes necesitarán almacenamiento de objetos más adelante.
+Esta base todavía no reemplaza toda la aplicación Python. La extracción de PDF/imágenes, el agente conversacional y el envío de respuestas a WhatsApp se migrarán en las siguientes fases. El panel ya permite configurar y comprobar Workers AI, OpenAI, Anthropic y Google Gemini, con modelos sugeridos según el proveedor. No requiere una suscripción de R2: en esta etapa conserva texto y descripciones en SQLite; los binarios grandes necesitarán almacenamiento de objetos más adelante.
 
 ## 1. Instalar y comprobar localmente
 
