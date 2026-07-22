@@ -14,6 +14,9 @@ describe("tenant dashboard HTML", () => {
     expect(html).toContain("Configuración del bot");
     expect(html).toContain("Base de conocimiento");
     expect(html).toContain("Probar conocimiento");
+    expect(html).toContain("Integraciones");
+    expect(html).toContain("Meta · WhatsApp");
+    expect(html).toContain("Cloudflare Workers AI");
     expect(html).not.toContain("ADMIN_API_TOKEN");
   });
 });

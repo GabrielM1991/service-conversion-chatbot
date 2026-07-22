@@ -15,6 +15,13 @@ import {
   searchKnowledge,
   validateKnowledgeInput,
 } from "./knowledge";
+import {
+  publicIntegrations,
+  saveIntegrations,
+  testIntegration,
+  validateIntegrationInput,
+  whatsappSecrets,
+} from "./integrations";
 import { isAdminRequest, isValidIdentifier, verifyMetaSignature } from "./security";
 import { TenantWorkspace } from "./tenant-workspace";
 import { dashboardHtml, loginHtml, setupHtml } from "./ui";
@@ -180,7 +187,8 @@ async function verifyWhatsappWebhook(
   const mode = url.searchParams.get("hub.mode");
   const token = url.searchParams.get("hub.verify_token");
   const challenge = url.searchParams.get("hub.challenge");
-  if (mode !== "subscribe" || token !== env.WHATSAPP_VERIFY_TOKEN || !challenge) {
+  const credentials = await whatsappSecrets(env, tenantId);
+  if (mode !== "subscribe" || token !== credentials.verifyToken || !challenge) {
     return json({ detail: "Verificación rechazada" }, 403);
   }
   return new Response(challenge, { status: 200 });
@@ -192,10 +200,11 @@ async function receiveWhatsappWebhook(
   tenantId: string,
 ): Promise<Response> {
   const body = await request.arrayBuffer();
+  const credentials = await whatsappSecrets(env, tenantId);
   const signatureValid = await verifyMetaSignature(
     body,
     request.headers.get("X-Hub-Signature-256"),
-    env.META_APP_SECRET,
+    credentials.appSecret,
   );
   if (!signatureValid) return json({ detail: "Firma de Meta inválida" }, 401);
   if (!(await activeTenant(env, tenantId))) return json({ detail: "Empresa no encontrada" }, 404);
@@ -336,6 +345,50 @@ async function tenantSettings(request: Request, env: Env, tenantId: string): Pro
   return tenantSettings(new Request(request.url, { method: "GET", headers: request.headers }), env, tenantId);
 }
 
+async function tenantIntegrations(request: Request, env: Env, tenantId: string): Promise<Response> {
+  const mutation = request.method === "PUT";
+  const access = await authorizeTenant(request, env, tenantId, mutation);
+  if (access instanceof Response) return access;
+  if (!(await activeTenant(env, tenantId))) return json({ detail: "Empresa no encontrada" }, 404);
+  if (!mutation) {
+    return json(await publicIntegrations(env, tenantId, new URL(request.url).origin));
+  }
+  try {
+    const input = validateIntegrationInput(await request.json());
+    await saveIntegrations(env, tenantId, input);
+    await env.GLOBAL_DB.prepare(
+      "INSERT INTO audit_events (id, tenant_id, user_id, action, metadata) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(
+        crypto.randomUUID(), tenantId, access.userId, "integrations.updated",
+        JSON.stringify({ aiProvider: input.aiProvider, whatsappEnabled: input.whatsappEnabled }),
+      )
+      .run();
+    return json(await publicIntegrations(env, tenantId, new URL(request.url).origin));
+  } catch (error) {
+    return json({ detail: error instanceof Error ? error.message : "Configuración inválida" }, 400);
+  }
+}
+
+async function tenantIntegrationTest(request: Request, env: Env, tenantId: string): Promise<Response> {
+  const access = await authorizeTenant(request, env, tenantId, true);
+  if (access instanceof Response) return access;
+  const payload = (await request.json()) as Record<string, unknown>;
+  const target = payload.target === "whatsapp" || payload.target === "ai" ? payload.target : null;
+  if (!target) return json({ detail: "Integración inválida" }, 400);
+  try {
+    const result = await testIntegration(env, tenantId, target);
+    await env.GLOBAL_DB.prepare(
+      "INSERT INTO audit_events (id, tenant_id, user_id, action, metadata) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(crypto.randomUUID(), tenantId, access.userId, `integrations.${target}.tested`, "{}")
+      .run();
+    return json(result);
+  } catch (error) {
+    return json({ detail: error instanceof Error ? error.message : "No fue posible probar la conexión" }, 422);
+  }
+}
+
 async function listKnowledge(request: Request, env: Env, tenantId: string): Promise<Response> {
   const access = await authorizeTenant(request, env, tenantId);
   if (access instanceof Response) return access;
@@ -445,6 +498,18 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
   const settings = url.pathname.match(/^\/api\/tenants\/([A-Za-z0-9_-]{2,80})\/settings$/);
   if (settings?.[1] && (request.method === "GET" || request.method === "PUT")) {
     return tenantSettings(request, env, settings[1]);
+  }
+  const integrations = url.pathname.match(
+    /^\/api\/tenants\/([A-Za-z0-9_-]{2,80})\/integrations$/,
+  );
+  if (integrations?.[1] && (request.method === "GET" || request.method === "PUT")) {
+    return tenantIntegrations(request, env, integrations[1]);
+  }
+  const integrationTest = url.pathname.match(
+    /^\/api\/tenants\/([A-Za-z0-9_-]{2,80})\/integrations\/test$/,
+  );
+  if (integrationTest?.[1] && request.method === "POST") {
+    return tenantIntegrationTest(request, env, integrationTest[1]);
   }
   return json({ detail: "Ruta no encontrada" }, 404);
 }

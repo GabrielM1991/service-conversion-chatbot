@@ -12,9 +12,10 @@ Esta carpeta contiene la primera base **Cloudflare-native** del producto. Conviv
 - Firma HMAC del webhook de Meta y secretos fuera del repositorio.
 - Panel web responsive con propietarios, sesiones, roles y protección CSRF.
 - Configuración del nombre, tono, bienvenida e instrucciones del bot.
+- Integraciones por tenant para Meta/WhatsApp y modelos de IA, con credenciales cifradas.
 - Pruebas unitarias y verificación automática en GitHub Actions.
 
-Esta base todavía no reemplaza toda la aplicación Python. La extracción de PDF/imágenes, el agente conversacional, proveedores de IA externos y el envío de respuestas a WhatsApp se migrarán en las siguientes fases. No requiere una suscripción de R2: en esta etapa conserva texto y descripciones en SQLite; los binarios grandes necesitarán almacenamiento de objetos más adelante.
+Esta base todavía no reemplaza toda la aplicación Python. La extracción de PDF/imágenes, el agente conversacional y el envío de respuestas a WhatsApp se migrarán en las siguientes fases. El panel ya permite configurar y comprobar Workers AI, OpenAI y Anthropic. No requiere una suscripción de R2: en esta etapa conserva texto y descripciones en SQLite; los binarios grandes necesitarán almacenamiento de objetos más adelante.
 
 ## 1. Instalar y comprobar localmente
 
@@ -64,7 +65,10 @@ Ejecuta cada comando y pega el valor cuando Wrangler lo solicite. No escribas el
 npx wrangler secret put ADMIN_API_TOKEN
 npx wrangler secret put META_APP_SECRET
 npx wrangler secret put WHATSAPP_VERIFY_TOKEN
+npx wrangler secret put INTEGRATIONS_ENCRYPTION_KEY
 ```
+
+`INTEGRATIONS_ENCRYPTION_KEY` debe ser un valor aleatorio de al menos 32 caracteres. No lo cambies después de guardar integraciones: se utiliza para cifrar y descifrar las credenciales de todos los tenants.
 
 `wrangler.jsonc` utiliza `APP_ENV=production` por defecto para no devolver errores internos. `.dev.vars` lo sustituye localmente por `development` para facilitar el diagnóstico.
 
@@ -109,7 +113,7 @@ El webhook que debes registrar en Meta será:
 https://TU-WORKER.workers.dev/webhooks/whatsapp/ClinicaDental_01
 ```
 
-Meta usará `WHATSAPP_VERIFY_TOKEN` para verificar la URL y `META_APP_SECRET` para firmar cada mensaje recibido.
+Meta usará el Verify Token y App Secret configurados en el panel para ese tenant. Los secretos globales `WHATSAPP_VERIFY_TOKEN` y `META_APP_SECRET` se conservan como respaldo durante la transición.
 
 ## Endpoints disponibles
 
@@ -126,8 +130,10 @@ Meta usará `WHATSAPP_VERIFY_TOKEN` para verificar la URL y `META_APP_SECRET` pa
 | `POST` | `/api/tenants/:tenantId/knowledge/search` | sesión/membresía o token administrador | Buscar contexto del tenant |
 | `GET/DELETE` | `/api/tenants/:tenantId/knowledge[/sourceId]` | sesión y membresía | Listar o eliminar fuentes |
 | `GET/PUT` | `/api/tenants/:tenantId/settings` | sesión y membresía | Configurar personalidad del bot |
+| `GET/PUT` | `/api/tenants/:tenantId/integrations` | sesión y membresía | Configurar Meta/WhatsApp y proveedor de IA |
+| `POST` | `/api/tenants/:tenantId/integrations/test` | sesión y membresía | Comprobar una conexión sin exponer secretos |
 | `GET` | `/api/tenants/:tenantId/summary` | sesión/membresía o token administrador | Consultar contadores privados |
 
 ## Aislamiento y seguridad
 
-Los registros globales viven en D1. Los datos operativos, textos y fragmentos de cada empresa se almacenan en un Durable Object SQLite distinto, identificado por el tenant. Toda consulta a Vectorize exige el filtro `tenantId` y sus resultados se resuelven contra el SQLite del mismo tenant. Cada endpoint del panel vuelve a comprobar la membresía y el rol en el servidor; ocultar botones en la interfaz no se considera autorización. El Worker valida CSRF, origen, firma de Meta y deduplicación transaccional, y no expone errores internos cuando `APP_ENV=production`.
+Los registros globales viven en D1. Los datos operativos, textos y fragmentos de cada empresa se almacenan en un Durable Object SQLite distinto, identificado por el tenant. Toda consulta a Vectorize exige el filtro `tenantId` y sus resultados se resuelven contra el SQLite del mismo tenant. Las credenciales de integración se cifran con AES-GCM, contexto autenticado por tenant y una clave maestra almacenada como Cloudflare Secret; la API pública solo devuelve valores enmascarados. Cada endpoint del panel vuelve a comprobar la membresía y el rol en el servidor; ocultar botones en la interfaz no se considera autorización. El Worker valida CSRF, origen, firma de Meta y deduplicación transaccional, y no expone errores internos cuando `APP_ENV=production`.
