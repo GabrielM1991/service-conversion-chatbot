@@ -99,6 +99,15 @@ class SqlAlchemyConversationRepository:
                     direction="outbound",
                     body=outgoing.text,
                     intent=intent.intent.value,
+                    intent_confidence=intent.confidence,
+                    requires_human=intent.requires_human,
+                    ai_source=intent.source,
+                    ai_model=intent.model,
+                    prompt_version=intent.prompt_version,
+                    input_tokens=intent.input_tokens,
+                    output_tokens=intent.output_tokens,
+                    ai_latency_ms=intent.latency_ms,
+                    fallback_used=intent.fallback_used,
                 )
             )
 

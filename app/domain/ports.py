@@ -21,7 +21,9 @@ class OptOutStore(Protocol):
 
 
 class IntentClassifier(Protocol):
-    async def classify(self, message: str, tenant: Tenant) -> IntentResult: ...
+    async def classify(
+        self, message: str, tenant: Tenant, customer_phone: str | None = None
+    ) -> IntentResult: ...
 
 
 class CalendarGateway(Protocol):

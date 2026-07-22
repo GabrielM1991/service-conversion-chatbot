@@ -48,3 +48,11 @@ class ChatbotTests(IsolatedAsyncioTestCase):
 
         with self.assertRaisesRegex(LookupError, "Tenant no encontrado"):
             await container.processor.execute(message("wamid-2", "Hola", "tenant-inexistente"))
+
+    async def test_customer_can_request_a_human_advisor(self) -> None:
+        container = build_container()
+
+        await container.processor.execute(message("wamid-human", "Quiero hablar con una persona"))
+
+        self.assertEqual(len(container.chat.sent), 1)
+        self.assertIn("asesor humano", container.chat.sent[0].text)

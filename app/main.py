@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Service Conversion Chatbot",
-    version="0.3.0",
+    version="0.4.0",
     description="Webhook multi-tenant con procesamiento asíncrono y arquitectura hexagonal.",
     lifespan=lifespan,
 )
@@ -52,7 +52,12 @@ class WhatsAppWebhook(BaseModel):
 @app.get("/health")
 async def health(request: Request) -> dict[str, str]:
     runtime = request.app.state.container
-    return {"status": "ok", "storage": runtime.storage_mode, "broker": runtime.broker_mode}
+    return {
+        "status": "ok",
+        "storage": runtime.storage_mode,
+        "broker": runtime.broker_mode,
+        "ai": runtime.ai_mode,
+    }
 
 
 @app.get("/ready")

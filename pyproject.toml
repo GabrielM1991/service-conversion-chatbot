@@ -1,12 +1,13 @@
 [project]
 name = "service-conversion-chatbot"
-version = "0.3.0"
+version = "0.4.0"
 description = "SaaS multi-tenant para cualificacion, agendamiento y conversion por chat"
 requires-python = ">=3.11"
 dependencies = [
   "alembic>=1.16,<2",
   "asyncpg>=0.30,<1",
   "fastapi>=0.115,<1",
+  "openai>=2.26,<3",
   "pydantic>=2.10,<3",
   "redis>=6.2,<7",
   "sqlalchemy[asyncio]>=2.0.41,<3",

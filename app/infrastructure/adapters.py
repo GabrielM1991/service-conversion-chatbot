@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from datetime import datetime, timedelta
 
 from app.domain.models import IncomingMessage, Intent, IntentResult, OutgoingMessage, Tenant, TimeSlot
+from app.domain.ports import IntentClassifier
 
 logger = logging.getLogger("chatbot")
 
@@ -42,9 +44,16 @@ class InMemoryOptOutStore:
 class KeywordIntentClassifier:
     """Deterministic local adapter; replace with an LLM without changing the domain."""
 
-    async def classify(self, message: str, tenant: Tenant) -> IntentResult:
+    async def classify(
+        self, message: str, tenant: Tenant, customer_phone: str | None = None
+    ) -> IntentResult:
         normalized = message.lower()
         service = next((name for name in tenant.services if name in normalized), None)
+        if any(
+            phrase in normalized
+            for phrase in ("persona", "humano", "asesor", "hablar con alguien", "reclamo")
+        ):
+            return IntentResult(Intent.HUMAN_HANDOFF, service, 0.99, requires_human=True)
         if any(word in normalized for word in ("cita", "agendar", "reservar", "horario")):
             return IntentResult(Intent.BOOK_APPOINTMENT, service, 0.96)
         if any(word in normalized for word in ("pagar", "pago", "seña", "confirmar")):
@@ -52,6 +61,50 @@ class KeywordIntentClassifier:
         if any(word in normalized for word in ("precio", "cuánto", "dónde", "servicio")):
             return IntentResult(Intent.FAQ, service, 0.88)
         return IntentResult(Intent.UNKNOWN, service, 0.4)
+
+
+class ResilientIntentClassifier:
+    """Falls back to local rules and guards low-confidence model decisions."""
+
+    def __init__(
+        self,
+        primary: IntentClassifier,
+        fallback: IntentClassifier,
+        minimum_confidence: float = 0.72,
+    ) -> None:
+        if not 0 <= minimum_confidence <= 1:
+            raise ValueError("minimum_confidence debe estar entre 0 y 1")
+        self._primary = primary
+        self._fallback = fallback
+        self._minimum_confidence = minimum_confidence
+
+    async def classify(
+        self, message: str, tenant: Tenant, customer_phone: str | None = None
+    ) -> IntentResult:
+        try:
+            result = await self._primary.classify(message, tenant, customer_phone)
+        except Exception as error:
+            logger.warning(
+                "Clasificador LLM no disponible; se usa fallback local. Error=%s",
+                type(error).__name__,
+                extra={"component": "LLMFallback", "tenant": tenant.id},
+            )
+            local = await self._fallback.classify(message, tenant, customer_phone)
+            return replace(local, source="rules_fallback", fallback_used=True)
+
+        if result.requires_human or result.confidence < self._minimum_confidence:
+            logger.info(
+                "Guardrail de derivación activado. Confianza=%.2f SolicitudHumana=%s",
+                result.confidence,
+                result.requires_human,
+                extra={"component": "LLMGuardrail", "tenant": tenant.id},
+            )
+            return replace(
+                result,
+                intent=Intent.HUMAN_HANDOFF,
+                requires_human=True,
+            )
+        return result
 
 
 class FakeCalendarGateway:
