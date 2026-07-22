@@ -55,7 +55,7 @@ def test_health_reports_active_storage_adapter() -> None:
             "status": "ok",
             "storage": "memory",
             "broker": "memory",
-            "ai": "rules",
+            "ai": "tenant-configurable",
         }
 
 

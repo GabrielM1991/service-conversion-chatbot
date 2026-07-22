@@ -19,26 +19,37 @@ from app.application.strategies import (
 )
 from app.config import Settings, load_settings
 from app.domain.models import Tenant
-from app.domain.ports import ConversationRepository, DeduplicationStore, TenantRepository
+from app.domain.ports import (
+    AIConfigurationRepository,
+    ConversationRepository,
+    DeduplicationStore,
+    KnowledgeRepository,
+    TenantRepository,
+)
 from app.infrastructure.adapters import (
     ConsoleChatGateway,
     FakeCalendarGateway,
     FakePaymentGateway,
     InMemoryDeduplicationStore,
     InMemoryConversationRepository,
+    InMemoryAIConfigurationRepository,
+    InMemoryKnowledgeRepository,
     InMemoryOptOutStore,
     InMemoryTenantRepository,
     KeywordIntentClassifier,
-    ResilientIntentClassifier,
 )
 from app.infrastructure.database import create_database_engine, create_session_factory
 from app.infrastructure.event_bus import InMemoryEventBus, MessageEventBus, RedisStreamEventBus
-from app.infrastructure.openai_adapter import OpenAIIntentClassifier
+from app.infrastructure.knowledge import KnowledgeFileStore
 from app.infrastructure.redis_adapters import RedisDeduplicationStore, RedisOptOutStore
 from app.infrastructure.repositories import (
+    SqlAlchemyAIConfigurationRepository,
     SqlAlchemyConversationRepository,
+    SqlAlchemyKnowledgeRepository,
     SqlAlchemyTenantRepository,
 )
+from app.infrastructure.secrets import SecretCipher
+from app.infrastructure.tenant_ai import TenantConfiguredIntentClassifier
 
 
 @dataclass(slots=True)
@@ -48,23 +59,25 @@ class Container:
     chat: ConsoleChatGateway
     tenants: TenantRepository
     conversations: ConversationRepository
+    ai_configurations: AIConfigurationRepository
+    knowledge: KnowledgeRepository
+    secret_cipher: SecretCipher
+    file_store: KnowledgeFileStore
     deduplication: DeduplicationStore
     storage_mode: str
     broker_mode: str
     ai_mode: str
     app_env: str
     embedded_worker: bool
+    max_upload_bytes: int
     database_engine: AsyncEngine | None = None
     redis_client: Redis | None = None
-    openai_classifier: OpenAIIntentClassifier | None = None
 
     async def close(self) -> None:
         if self.database_engine is not None:
             await self.database_engine.dispose()
         if self.redis_client is not None:
             await self.redis_client.aclose()
-        if self.openai_classifier is not None:
-            await self.openai_classifier.close()
 
 
 def build_container(
@@ -78,6 +91,10 @@ def build_container(
         session_factory = create_session_factory(engine)
         tenants: TenantRepository = SqlAlchemyTenantRepository(session_factory)
         conversations = SqlAlchemyConversationRepository(session_factory)
+        ai_configurations: AIConfigurationRepository = SqlAlchemyAIConfigurationRepository(
+            session_factory
+        )
+        knowledge: KnowledgeRepository = SqlAlchemyKnowledgeRepository(session_factory)
         storage_mode = "postgresql"
     else:
         tenants = InMemoryTenantRepository(
@@ -99,6 +116,8 @@ def build_container(
             ]
         )
         conversations = InMemoryConversationRepository()
+        ai_configurations = InMemoryAIConfigurationRepository()
+        knowledge = InMemoryKnowledgeRepository()
         storage_mode = "memory"
     if conversations_override is not None:
         conversations = conversations_override
@@ -135,22 +154,18 @@ def build_container(
     calendar = FakeCalendarGateway()
     payments = FakePaymentGateway()
     local_classifier = KeywordIntentClassifier()
-    openai_classifier: OpenAIIntentClassifier | None = None
-    if runtime_settings.openai_api_key:
-        openai_classifier = OpenAIIntentClassifier(
-            api_key=runtime_settings.openai_api_key,
-            model=runtime_settings.openai_model,
-            prompt_version=runtime_settings.openai_prompt_version,
-        )
-        classifier = ResilientIntentClassifier(
-            openai_classifier,
-            local_classifier,
-            runtime_settings.llm_minimum_confidence,
-        )
-        ai_mode = "openai-with-fallback"
-    else:
-        classifier = local_classifier
-        ai_mode = "rules"
+    cipher = SecretCipher(runtime_settings.tenant_secret_key)
+    file_store = KnowledgeFileStore(runtime_settings.upload_dir)
+    classifier = TenantConfiguredIntentClassifier(
+        ai_configurations,
+        cipher,
+        local_classifier,
+        runtime_settings.openai_api_key,
+        runtime_settings.openai_model,
+        runtime_settings.openai_prompt_version,
+        runtime_settings.llm_minimum_confidence,
+    )
+    ai_mode = "tenant-configurable"
     fallback = UnknownIntentStrategy()
     factory = ChatbotAgentFactory(
         tenants,
@@ -172,13 +187,17 @@ def build_container(
         chat,
         tenants,
         conversations,
+        ai_configurations,
+        knowledge,
+        cipher,
+        file_store,
         dedupe,
         storage_mode,
         broker_mode,
         ai_mode,
         runtime_settings.app_env,
         embedded_worker,
+        runtime_settings.max_upload_bytes,
         engine,
         redis_client,
-        openai_classifier,
     )

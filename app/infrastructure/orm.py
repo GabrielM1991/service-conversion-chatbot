@@ -45,6 +45,9 @@ class TenantRow(Base):
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     tone: Mapped[str] = mapped_column(String(160), nullable=False)
+    bot_name: Mapped[str] = mapped_column(String(120), nullable=False, default="Asistente")
+    welcome_message: Mapped[str] = mapped_column(Text, nullable=False, default="Hola, ¿cómo puedo ayudarte?")
+    system_instructions: Mapped[str] = mapped_column(Text, nullable=False, default="")
     knowledge: Mapped[dict[str, str]] = mapped_column(JSONB, nullable=False, default=dict)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -53,6 +56,46 @@ class TenantRow(Base):
 
     services: Mapped[list[ServiceRow]] = relationship(
         back_populates="tenant", lazy="selectin", cascade="all, delete-orphan"
+    )
+
+
+class TenantAIConfigurationRow(Base):
+    __tablename__ = "tenant_ai_configurations"
+
+    tenant_id: Mapped[str] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), primary_key=True
+    )
+    provider: Mapped[str] = mapped_column(String(40), nullable=False, default="openai")
+    model: Mapped[str] = mapped_column(String(100), nullable=False, default="gpt-5.6-sol")
+    encrypted_api_key: Mapped[str | None] = mapped_column(Text)
+    key_last_four: Mapped[str | None] = mapped_column(String(4))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class KnowledgeSourceRow(Base):
+    __tablename__ = "knowledge_sources"
+    __table_args__ = (
+        Index("ix_knowledge_tenant_created", "tenant_id", "created_at"),
+        CheckConstraint("kind IN ('text', 'pdf', 'image')", name="ck_knowledge_kind"),
+        CheckConstraint("status IN ('ready', 'stored', 'failed')", name="ck_knowledge_status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[str] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    title: Mapped[str] = mapped_column(String(180), nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    filename: Mapped[str | None] = mapped_column(String(255))
+    content_type: Mapped[str | None] = mapped_column(String(120))
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    storage_key: Mapped[str | None] = mapped_column(String(255))
+    extracted_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
 

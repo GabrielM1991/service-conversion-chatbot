@@ -8,6 +8,28 @@ Con la aplicación levantada, abre `http://127.0.0.1:8000/` para usar una interf
 
 La interfaz incluye mensajes sugeridos, estado de salud, modo de IA activo, intención detectada y nivel de confianza. Los endpoints de apoyo `/demo/tenants` y `/demo/messages` solo están disponibles cuando `APP_ENV=development`; no se exponen en producción.
 
+## Panel de empresa
+
+Abre `http://127.0.0.1:8000/admin` para administrar cada tenant desde un panel aislado. Permite configurar nombre de empresa, nombre del bot, tono, bienvenida, instrucciones permanentes, proveedor, modelo y una API key propia.
+
+Las credenciales nunca se devuelven al navegador y se almacenan cifradas. Antes de guardar claves por tenant, genera una llave maestra y expórtala en la misma terminal desde la que levantas Docker:
+
+```bash
+export TENANT_SECRET_KEY="$(python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+docker compose up --build
+```
+
+Conserva esa llave fuera de GitHub; si se pierde, las credenciales cifradas existentes no podrán recuperarse.
+
+La biblioteca de conocimiento admite:
+
+- texto directo de hasta 100.000 caracteres;
+- PDF de hasta 10 MB y 200 páginas, con extracción de texto;
+- imágenes PNG, JPG y WEBP de hasta 10 MB, acompañadas por una descripción que se incorpora al contexto;
+- descarga y eliminación aisladas por tenant.
+
+Los binarios se guardan en el volumen `chatbot_uploads` y sus metadatos en PostgreSQL. Las fuentes listas se incorporan dinámicamente al contexto del tenant. El panel y sus endpoints administrativos solo están habilitados en `APP_ENV=development` hasta incorporar autenticación y autorización de usuarios.
+
 ## Arquitectura
 
 ```text

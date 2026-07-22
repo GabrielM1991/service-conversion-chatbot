@@ -20,6 +20,9 @@ class Tenant:
     tone: str
     services: dict[str, int]
     knowledge: dict[str, str] = field(default_factory=dict)
+    bot_name: str = "Asistente"
+    welcome_message: str = "Hola, ¿cómo puedo ayudarte?"
+    system_instructions: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,3 +72,27 @@ class ConversationEntry:
     confidence: float | None = None
     ai_source: str | None = None
     requires_human: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class AIConfiguration:
+    tenant_id: str
+    provider: str = "openai"
+    model: str = "gpt-5.6-sol"
+    encrypted_api_key: str | None = None
+    key_last_four: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class KnowledgeSource:
+    id: str
+    tenant_id: str
+    title: str
+    kind: str
+    status: str
+    created_at: datetime
+    filename: str | None = None
+    content_type: str | None = None
+    size_bytes: int = 0
+    storage_key: str | None = None
+    extracted_text: str = ""

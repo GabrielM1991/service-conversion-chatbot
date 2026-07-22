@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ServiceFlow · Panel de empresa</title>
+    <link rel="stylesheet" href="/assets/admin.css" />
+  </head>
+  <body>
+    <div class="admin-shell">
+      <aside class="sidebar">
+        <a class="brand" href="/admin"><span>SF</span><strong>ServiceFlow</strong></a>
+        <p class="workspace-label">Workspace</p>
+        <nav aria-label="Navegación principal">
+          <a class="active" href="#profile">Personalidad del bot</a>
+          <a href="#ai">Configuración de IA</a>
+          <a href="#knowledge">Conocimiento</a>
+          <a href="/demo">Abrir simulador <b>↗</b></a>
+        </nav>
+        <div class="sidebar-note">
+          <span></span>
+          <div><strong>Entorno local</strong><small>Sin acceso público</small></div>
+        </div>
+      </aside>
+
+      <main class="content">
+        <header class="topbar">
+          <div>
+            <p>Centro de configuración</p>
+            <h1>Entrena y personaliza tu asistente.</h1>
+          </div>
+          <label class="tenant-picker">
+            <span>Empresa activa</span>
+            <select id="tenant-select"></select>
+          </label>
+        </header>
+
+        <section class="summary-grid" aria-label="Resumen">
+          <article><span class="metric-icon green">AI</span><div><small>Proveedor</small><strong id="provider-summary">OpenAI</strong></div></article>
+          <article><span class="metric-icon lime">KB</span><div><small>Fuentes activas</small><strong id="source-count">0 documentos</strong></div></article>
+          <article><span class="metric-icon sand">BOT</span><div><small>Nombre visible</small><strong id="bot-summary">Asistente</strong></div></article>
+        </section>
+
+        <form id="settings-form">
+          <section id="profile" class="panel">
+            <div class="panel-heading">
+              <div><p class="eyebrow">Identidad</p><h2>Personalidad del bot</h2></div>
+              <span class="step">01</span>
+            </div>
+            <div class="form-grid">
+              <label><span>Nombre de la empresa</span><input id="business-name" required maxlength="160" /></label>
+              <label><span>Nombre del bot</span><input id="bot-name" required maxlength="120" placeholder="Ej. Sofía" /></label>
+              <label class="wide"><span>Tono de comunicación</span><input id="tone" required maxlength="160" placeholder="Cercano, profesional y claro" /></label>
+              <label class="wide"><span>Mensaje de bienvenida</span><textarea id="welcome" rows="3" required maxlength="1000"></textarea></label>
+              <label class="wide"><span>Instrucciones permanentes</span><textarea id="instructions" rows="5" maxlength="8000" placeholder="Reglas, límites, estilo y objetivos comerciales del asistente…"></textarea><small>Estas instrucciones se incorporan al contexto dinámico de la empresa.</small></label>
+            </div>
+          </section>
+
+          <section id="ai" class="panel">
+            <div class="panel-heading">
+              <div><p class="eyebrow">Proveedor</p><h2>Configuración de IA</h2></div>
+              <span class="step">02</span>
+            </div>
+            <div class="form-grid">
+              <label><span>Proveedor</span><select id="provider"><option value="openai">OpenAI</option></select></label>
+              <label><span>Modelo</span><select id="model"><option>gpt-5.6-sol</option><option>gpt-5.6-terra</option><option>gpt-5.6-luna</option></select></label>
+              <label class="wide"><span>API key privada</span><div class="secret-field"><input id="api-key" type="password" autocomplete="new-password" placeholder="Introduce una clave nueva para reemplazar la actual" /><button id="toggle-key" type="button" aria-label="Mostrar u ocultar clave">Ver</button></div><small id="key-status">La clave nunca se muestra nuevamente.</small></label>
+            </div>
+            <div id="encryption-warning" class="warning" hidden>Configura <code>TENANT_SECRET_KEY</code> en el servidor para guardar credenciales cifradas.</div>
+          </section>
+
+          <div class="save-row"><span id="save-status" role="status"></span><button class="primary" type="submit">Guardar configuración</button></div>
+        </form>
+
+        <section id="knowledge" class="panel knowledge-panel">
+          <div class="panel-heading">
+            <div><p class="eyebrow">Biblioteca</p><h2>Conocimiento de la empresa</h2><p class="subcopy">Agrega información que el asistente podrá usar en sus conversaciones.</p></div>
+            <span class="step">03</span>
+          </div>
+
+          <div class="knowledge-actions">
+            <form id="text-form" class="source-card">
+              <span class="source-icon">TXT</span>
+              <div><strong>Agregar texto</strong><small>Políticas, preguntas frecuentes o procesos.</small></div>
+              <input id="text-title" required maxlength="180" placeholder="Título: Precios y reservas" />
+              <textarea id="text-content" required maxlength="100000" rows="4" placeholder="Escribe o pega aquí el conocimiento…"></textarea>
+              <button type="submit">Añadir a la biblioteca</button>
+            </form>
+
+            <form id="file-form" class="source-card" enctype="multipart/form-data">
+              <span class="source-icon">FILE</span>
+              <div><strong>Subir PDF o imagen</strong><small>Máximo 10 MB · PDF, PNG, JPG o WEBP.</small></div>
+              <input id="file-title" required maxlength="180" placeholder="Título del contenido" />
+              <label class="drop-zone" for="knowledge-file"><input id="knowledge-file" type="file" accept="application/pdf,image/png,image/jpeg,image/webp" required /><strong id="file-label">Selecciona un archivo</strong><small>Los PDF se extraen automáticamente.</small></label>
+              <textarea id="file-description" maxlength="10000" rows="3" placeholder="Para imágenes, describe qué debe aprender la IA."></textarea>
+              <button type="submit">Procesar archivo</button>
+            </form>
+          </div>
+
+          <div class="library-heading"><div><h3>Fuentes cargadas</h3><span id="library-status"></span></div></div>
+          <div id="source-list" class="source-list"></div>
+        </section>
+      </main>
+    </div>
+    <div id="toast" class="toast" role="status" hidden></div>
+    <script src="/assets/admin.js" defer></script>
+  </body>
+</html>

@@ -20,6 +20,9 @@ class Settings:
     openai_model: str = "gpt-5.6-sol"
     openai_prompt_version: str = "intent-router-v1"
     llm_minimum_confidence: float = 0.72
+    tenant_secret_key: str | None = None
+    upload_dir: str = "/tmp/chatbot_uploads"
+    max_upload_bytes: int = 10 * 1024 * 1024
 
     @property
     def uses_postgres(self) -> bool:
@@ -45,4 +48,7 @@ def load_settings() -> Settings:
         openai_model=os.getenv("OPENAI_MODEL", "gpt-5.6-sol"),
         openai_prompt_version=os.getenv("OPENAI_PROMPT_VERSION", "intent-router-v1"),
         llm_minimum_confidence=float(os.getenv("LLM_MINIMUM_CONFIDENCE", "0.72")),
+        tenant_secret_key=os.getenv("TENANT_SECRET_KEY") or None,
+        upload_dir=os.getenv("UPLOAD_DIR", "/tmp/chatbot_uploads"),
+        max_upload_bytes=int(os.getenv("MAX_UPLOAD_BYTES", str(10 * 1024 * 1024))),
     )

@@ -91,9 +91,10 @@ class OpenAIIntentClassifier:
     def _system_prompt(self, tenant: Tenant) -> str:
         services = ", ".join(tenant.services) or "ninguno configurado"
         knowledge = "; ".join(f"{key}: {value}" for key, value in tenant.knowledge.items())
-        return f"""Eres el enrutador de intención de {tenant.name}.
+        return f"""Eres el enrutador de intención de {tenant.name} para el bot {tenant.bot_name}.
 Tu única tarea es clasificar, no responder al cliente ni ejecutar acciones.
 Tono configurado del negocio: {tenant.tone}.
+Instrucciones permanentes del negocio: {tenant.system_instructions or "ninguna adicional"}.
 Servicios válidos: {services}.
 Información del negocio: {knowledge or "sin información adicional"}.
 

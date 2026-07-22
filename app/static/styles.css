@@ -206,6 +206,7 @@ button, select { cursor: pointer; }
   text-decoration: none;
 }
 .docs-link:hover { color: var(--lime); }
+.side-links { display: grid; gap: 10px; }
 
 .chat-panel { display: grid; grid-template-rows: auto 1fr auto auto auto; min-width: 0; }
 

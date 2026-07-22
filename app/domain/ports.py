@@ -5,11 +5,13 @@ from typing import Protocol
 
 from app.domain.models import (
     ConversationEntry,
+    AIConfiguration,
     IncomingMessage,
     IntentResult,
     OutgoingMessage,
     Tenant,
     TimeSlot,
+    KnowledgeSource,
 )
 
 
@@ -17,6 +19,8 @@ class TenantRepository(Protocol):
     async def get(self, tenant_id: str) -> Tenant | None: ...
 
     async def list_active(self) -> list[Tenant]: ...
+
+    async def update_profile(self, tenant: Tenant) -> None: ...
 
 
 class DeduplicationStore(Protocol):
@@ -63,3 +67,19 @@ class ConversationRepository(Protocol):
 
 class EventPublisher(Protocol):
     async def publish(self, event: IncomingMessage) -> None: ...
+
+
+class AIConfigurationRepository(Protocol):
+    async def get(self, tenant_id: str) -> AIConfiguration | None: ...
+
+    async def save(self, configuration: AIConfiguration) -> None: ...
+
+
+class KnowledgeRepository(Protocol):
+    async def list(self, tenant_id: str) -> list[KnowledgeSource]: ...
+
+    async def add(self, source: KnowledgeSource) -> None: ...
+
+    async def get(self, tenant_id: str, source_id: str) -> KnowledgeSource | None: ...
+
+    async def delete(self, tenant_id: str, source_id: str) -> KnowledgeSource | None: ...
