@@ -6,6 +6,7 @@ export interface Env {
   ADMIN_API_TOKEN: string;
   META_APP_SECRET: string;
   WHATSAPP_VERIFY_TOKEN: string;
+  INTEGRATIONS_ENCRYPTION_KEY: string;
   GLOBAL_DB: D1Database;
   TENANT_WORKSPACE: DurableObjectNamespace<TenantWorkspace>;
   MESSAGE_QUEUE: Queue<WhatsappMessageReceived>;

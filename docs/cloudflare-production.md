@@ -15,7 +15,7 @@ Cloudflare Worker
        `---- Workers AI -> Vectorize (referencias con filtro tenantId)
 ```
 
-La base recibe webhooks firmados, publica mensajes sin bloquear la petición, deduplica dentro del espacio privado del tenant y permite guardar/buscar texto de conocimiento. También incorpora panel responsive, propietarios, sesiones, roles y configuración del bot. PDF/imágenes, proveedores externos y la respuesta saliente permanecen todavía en FastAPI.
+La base recibe webhooks firmados, publica mensajes sin bloquear la petición, deduplica dentro del espacio privado del tenant y permite guardar/buscar texto de conocimiento. También incorpora panel responsive, propietarios, sesiones, roles, configuración del bot e integraciones cifradas de Meta/WhatsApp, Workers AI, OpenAI y Anthropic. PDF/imágenes, el uso conversacional efectivo del proveedor elegido y la respuesta saliente permanecen todavía en FastAPI.
 
 ## Ruta híbrida con el backend existente
 
@@ -54,9 +54,9 @@ Cloudflare Container (FastAPI)
 
 1. Aprovisionar D1, Queues y Vectorize siguiendo el README de `cloudflare/`.
 2. Desplegar el Worker y validar el webhook firmado con un tenant de prueba.
-3. Crear propietarios desde `/setup`, validar sesiones y personalizar el bot desde `/admin`.
+3. Crear propietarios desde `/setup`, validar sesiones y configurar bot e integraciones desde `/admin`.
 4. Añadir extracción segura de PDF e imágenes y elegir almacenamiento de objetos para sus binarios.
-5. Portar el orquestador, las estrategias, proveedores externos y el envío real mediante WhatsApp Cloud API.
+5. Portar el orquestador, utilizar el proveedor configurado y habilitar el envío real mediante WhatsApp Cloud API.
 6. Integrar Calendar y pagos con webhooks idempotentes.
 7. Importar datos existentes, probar rollback y cambiar DNS cuando exista paridad funcional.
 
