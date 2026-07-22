@@ -24,7 +24,15 @@ def test_health_reports_active_storage_adapter() -> None:
         response = client.get("/health")
 
         assert response.status_code == 200
-        assert response.json() == {"status": "ok", "storage": "memory"}
+        assert response.json() == {"status": "ok", "storage": "memory", "broker": "memory"}
+
+
+def test_ready_succeeds_without_external_dependencies_in_memory_mode() -> None:
+    with TestClient(app) as client:
+        response = client.get("/ready")
+
+        assert response.status_code == 200
+        assert response.json() == {"status": "ready"}
 
 
 def test_webhook_rejects_missing_tenant_header() -> None:
